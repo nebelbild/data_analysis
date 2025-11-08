@@ -1,5 +1,4 @@
-"""
-テスト用モックLLMリポジトリ
+"""テスト用モックLLMリポジトリ
 
 Azure OpenAI APIキーが不要なテスト用実装
 """
@@ -9,13 +8,12 @@ from src.domain.repositories.llm_repository import LLMRepository
 
 class MockLLMRepository(LLMRepository):
     """テスト用のモックLLMリポジトリ"""
-    
+
     def __init__(self):
         pass
-    
+
     def generate_text(self, prompt: str, max_tokens: int = 1000) -> str:
         """テスト用の固定レスポンスを返す"""
-        
         if "分析コード" in prompt or "matplotlib" in prompt or "seaborn" in prompt:
             return """```python
 import pandas as pd
@@ -69,8 +67,8 @@ campaign_success = df.groupby('campaign_type')['is_successful'].agg(['count', 's
 print("=== キャンペーンタイプ別成功率 ===")
 print(campaign_success)
 ```"""
-        
-        elif "レビュー" in prompt or "review" in prompt:
+
+        if "レビュー" in prompt or "review" in prompt:
             return """## 分析結果レビュー
 
 ### 📊 データの概要
@@ -93,8 +91,8 @@ print(campaign_success)
 - サンプルサイズ（500件）は中規模
 - 季節性やトレンドの考慮が必要
 - 統計的有意性の検定推奨"""
-        
-        elif "レポート" in prompt or "report" in prompt:
+
+        if "レポート" in prompt or "report" in prompt:
             return """# データ分析レポート
 
 ## エグゼクティブサマリー
@@ -131,6 +129,5 @@ print(campaign_success)
 
 ## 結論
 現在のマーケティング活動は一定の成果を上げているが、データドリブンな最適化により更なる成長が期待できます。"""
-        
-        else:
-            return "テスト用のモックレスポンスです。実際のAI分析結果ではありません。"
+
+        return "テスト用のモックレスポンスです。実際のAI分析結果ではありません。"

@@ -4,4 +4,4 @@ from .program import Program
 from .review import Review
 
 
-__all__ = ["DataThread", "Plan", "Program", "Review", "Task", "SubTask"]
+__all__ = ["DataThread", "Plan", "Program", "Review", "SubTask", "Task"]

@@ -1,5 +1,4 @@
-"""
-TDD Green Phase: OpenAILLMRepository 実装（Azure OpenAI対応）
+"""TDD Green Phase: OpenAILLMRepository 実装（Azure OpenAI対応）
 
 t-wadaさんのTDD原則: テストが通る最小限の実装
 
@@ -11,7 +10,8 @@ t-wadaさんのTDD原則: テストが通る最小限の実装
 
 import logging
 import os
-from typing import Any, Dict, Generator, List
+from typing import Any
+from collections.abc import Generator
 
 from src.domain.repositories.llm_repository import LLMRepository
 
@@ -26,13 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAILLMRepository(LLMRepository):
-    """
-    Azure OpenAI LLM実装
-    
+    """Azure OpenAI LLM実装
+
     設計原則:
     - 単一責任の原則（SRP）: LLM操作のみを責務とする
     - 依存性逆転の原則（DIP）: LLMRepositoryインターフェースに依存
-    
+
     Azure OpenAI設定:
     - リソースグループ: rg-1
     - デプロイメント名: activarch-test-genpptx
@@ -41,17 +40,19 @@ class OpenAILLMRepository(LLMRepository):
     """
 
     def __init__(self, api_key: str | None = None, endpoint: str | None = None):
-        """
-        コンストラクタ
+        """コンストラクタ
 
         Args:
             api_key: Azure OpenAI APIキー（省略時は環境変数から取得）
             endpoint: Azure OpenAI エンドポイント（省略時は環境変数から取得）
+
         """
         # Azure OpenAI設定
-        self.api_key = api_key or os.environ.get('AZURE_OPENAI_API_KEY')
-        self.endpoint = endpoint or os.environ.get('AZURE_OPENAI_ENDPOINT')
-        self.api_version = os.environ.get('AZURE_OPENAI_API_VERSION', '2024-08-01-preview')
+        self.api_key = api_key or os.environ.get("AZURE_OPENAI_API_KEY")
+        self.endpoint = endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT")
+        self.api_version = os.environ.get(
+            "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
+        )
         self.deployment_name = "activarch-test-genpptx"  # 実際のデプロイメント名
         self._offline_reason: str | None = None
 
@@ -61,7 +62,7 @@ class OpenAILLMRepository(LLMRepository):
                 self._client = AzureOpenAI(
                     api_key=self.api_key,
                     api_version=self.api_version,
-                    azure_endpoint=self.endpoint
+                    azure_endpoint=self.endpoint,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Azure OpenAI クライアント初期化に失敗しました: %s", exc)
@@ -82,50 +83,52 @@ class OpenAILLMRepository(LLMRepository):
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: type | None = None,
     ) -> Any:
-        """
-        Azure OpenAIから応答を生成
-        
+        """Azure OpenAIから応答を生成
+
         Args:
             messages: メッセージのリスト（役割とコンテンツ）
             model: モデル名（デプロイメント名で上書きされます）
             temperature: ランダム性（0.0-2.0）
             max_tokens: 最大トークン数（省略可）
             response_format: 応答フォーマット（Pydanticモデル、省略可）
-            
+
         Returns:
             str: LLM応答テキスト
-            
+
         実装詳細:
         - Azure OpenAIではmodel引数をdeployment_nameに置き換え
         - デプロイメント名は固定: activarch-test-genpptx
         - response.choices[0].message.contentを返す
         - response_formatが指定されている場合はStructured Outputsを使用
+
         """
         if not self._client:
             return self._generate_offline_response(messages, response_format)
-        
+
         # Azure OpenAI API呼び出しパラメータの構築
         api_params = {
             "model": self.deployment_name,  # デプロイメント名を使用
             "messages": messages,
             "temperature": temperature,
         }
-        
+
         if max_tokens is not None:
             api_params["max_tokens"] = max_tokens
-            
+
         # Structured Outputs対応: response_formatがPydantic BaseModelの場合はparse()を使用
         if response_format is not None:
             import inspect
             from pydantic import BaseModel
-            
-            if inspect.isclass(response_format) and issubclass(response_format, BaseModel):
+
+            if inspect.isclass(response_format) and issubclass(
+                response_format, BaseModel
+            ):
                 # Pydantic BaseModelの場合はparse()メソッドを使用
                 parse_params = {
                     "model": self.deployment_name,
@@ -133,50 +136,48 @@ class OpenAILLMRepository(LLMRepository):
                     "temperature": temperature,
                     "response_format": response_format,
                 }
-                
+
                 if max_tokens is not None:
                     parse_params["max_completion_tokens"] = max_tokens
-                
+
                 response = self._client.beta.chat.completions.parse(**parse_params)
                 return response.choices[0].message.parsed
-            else:
-                # 従来のresponse_format（辞書形式など）の場合
-                api_params["response_format"] = response_format
-                response = self._client.chat.completions.create(**api_params)
-                return response.choices[0].message.content
-        else:
-            # response_formatが指定されていない場合
+            # 従来のresponse_format（辞書形式など）の場合
+            api_params["response_format"] = response_format
             response = self._client.chat.completions.create(**api_params)
             return response.choices[0].message.content
+        # response_formatが指定されていない場合
+        response = self._client.chat.completions.create(**api_params)
+        return response.choices[0].message.content
 
     def stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> Generator[str, None, None]:
-        """
-        Azure OpenAIからストリーミング応答を生成
-        
+        """Azure OpenAIからストリーミング応答を生成
+
         Args:
             messages: メッセージのリスト
             model: モデル名（デプロイメント名で上書きされます）
             temperature: ランダム性
             max_tokens: 最大トークン数
-            
+
         Yields:
             str: 応答のチャンク（逐次的に生成される）
-            
+
         実装詳細:
         - stream=Trueでストリーミング応答を取得
         - チャンクごとにyield
+
         """
         if not self._client:
             for chunk in self._generate_offline_stream(messages):
                 yield chunk
             return
-        
+
         # Azure OpenAI APIコール（ストリーミング）
         response = self._client.chat.completions.create(
             model=self.deployment_name,  # デプロイメント名を使用
@@ -185,7 +186,7 @@ class OpenAILLMRepository(LLMRepository):
             max_tokens=max_tokens,
             stream=True,
         )
-        
+
         for chunk in response:
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
@@ -195,18 +196,20 @@ class OpenAILLMRepository(LLMRepository):
     # ==================================================================
     def _generate_offline_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         response_format: type | None,
     ) -> Any:
-        """
-        Azure OpenAIが利用できない場合に簡易応答を生成する。
-        """
+        """Azure OpenAIが利用できない場合に簡易応答を生成する。"""
         import inspect
         from pydantic import BaseModel  # type: ignore
 
         user_prompt = self._extract_latest_user_prompt(messages)
 
-        if response_format and inspect.isclass(response_format) and issubclass(response_format, BaseModel):
+        if (
+            response_format
+            and inspect.isclass(response_format)
+            and issubclass(response_format, BaseModel)
+        ):
             model_name = response_format.__name__
             if model_name == "Plan":
                 return self._build_rule_based_plan(user_prompt)
@@ -218,18 +221,16 @@ class OpenAILLMRepository(LLMRepository):
 
         return self._build_rule_based_report(user_prompt)
 
-    def _generate_offline_stream(self, messages: List[Dict[str, str]]):
-        """
-        簡易ストリーミングフォールバック。
-        """
+    def _generate_offline_stream(self, messages: list[dict[str, str]]):
+        """簡易ストリーミングフォールバック。"""
         content = self._build_rule_based_report(
-            self._extract_latest_user_prompt(messages)
+            self._extract_latest_user_prompt(messages),
         )
         for chunk in content.splitlines():
             yield chunk
 
     @staticmethod
-    def _extract_latest_user_prompt(messages: List[Dict[str, str]]) -> str:
+    def _extract_latest_user_prompt(messages: list[dict[str, str]]) -> str:
         for message in reversed(messages):
             if message.get("role") == "user":
                 return message.get("content", "")
@@ -330,7 +331,7 @@ class OpenAILLMRepository(LLMRepository):
                 show_plot()
             else:
                 print("channel_id column does not exist, skipped channel comparison.")
-            """
+            """,
         ).strip()
 
         execution_plan = (
@@ -361,7 +362,7 @@ class OpenAILLMRepository(LLMRepository):
                 "1. 相関が強い指標同士を重点的に改善する。",
                 "2. 成果の高いチャネルと停滞チャネルを比較し、施策を共有する。",
                 "3. 外れ値が多い列はデータ前処理や異常検知ルールを検討する。",
-            ]
+            ],
         )
 
         return Review(observation=observation, is_completed=True)
@@ -374,7 +375,7 @@ class OpenAILLMRepository(LLMRepository):
                 "2. 数値列の統計量と分布を確認して偏りを把握しました。",
                 "3. 相関ヒートマップで指標間の関係を整理しました。",
                 "4. channel_idが存在する場合は平均値を算出し、チャネル比較を行いました。",
-            ]
+            ],
         )
 
         return "\n".join(
@@ -390,6 +391,5 @@ class OpenAILLMRepository(LLMRepository):
                 "",
                 "## 留意事項",
                 "- 詳細な自然言語レポートが必要な場合はAzure OpenAI関連の依存関係を整えて再実行してください。",
-            ]
+            ],
         )
-
