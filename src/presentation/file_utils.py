@@ -19,6 +19,8 @@ from typing import Any
 import chardet
 import pandas as pd
 
+from src.infrastructure.file_lifecycle_manager import get_file_lifecycle_manager
+
 
 # 許可されたデータフォルダ（セキュリティ対策）
 ALLOWED_DATA_FOLDERS = [
@@ -68,6 +70,10 @@ def validate_file_path(file_path: str) -> bool:
                 return True  # 許可範囲内
             except ValueError:
                 continue
+        # 追跡中の一時ファイルであれば許可する
+        file_manager = get_file_lifecycle_manager()
+        if file_manager.is_tracked_file(real_path):
+            return True
 
         return False  # 許可範囲外
 

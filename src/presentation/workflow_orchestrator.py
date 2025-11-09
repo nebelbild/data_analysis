@@ -44,7 +44,12 @@ class StreamlitWorkflowOrchestrator:
         self.error_fallback_log: list[dict[str, Any]] = []  # スレッドID管理
 
     def process_user_message_async(
-        self, message: str, session_id: str, file_path: str | None = None,
+        self,
+        message: str,
+        session_id: str,
+        file_path: str | None = None,
+        *,
+        is_temporary_file: bool = False,
     ) -> str:
         """セッション分離対応の非同期処理
 
@@ -76,7 +81,7 @@ class StreamlitWorkflowOrchestrator:
         # バックグラウンドスレッドで実行
         job_thread = threading.Thread(
             target=self._run_analysis_job,
-            args=(message, session_id, file_path),
+            args=(message, session_id, file_path, is_temporary_file),
             name=f"analysis_job_{session_id}",
             daemon=True,
         )
@@ -88,7 +93,11 @@ class StreamlitWorkflowOrchestrator:
         return "STARTED"
 
     def _run_analysis_job(
-        self, message: str, session_id: str, file_path: str | None = None,
+        self,
+        message: str,
+        session_id: str,
+        file_path: str | None = None,
+        is_temporary_file: bool = False,
     ) -> None:
         """セッション分離されたバックグラウンド分析実行
 
@@ -109,20 +118,36 @@ class StreamlitWorkflowOrchestrator:
         process_id = f"{session_id}_{thread_id}"
 
         try:
-            # ファイルがアップロードされている場合は、データ情報を取得
-            data_info = ""
-            step_offset = 0
-            total_steps = 4
-
+            # TDD Green: file_pathに基づくdata_infoの適切な設定
             if file_path:
                 # ファイルパスの再検証（セキュリティ）
                 from pathlib import Path
                 from src.presentation.file_utils import validate_file_path
-                
-                if not Path(file_path).exists() or not validate_file_path(file_path):
+                import tempfile
+
+                path_obj = Path(file_path)
+
+                try:
+                    real_path = path_obj.resolve()
+                    path_exists = real_path.exists()
+                except (OSError, RuntimeError):
+                    path_exists = False
+                    real_path = path_obj
+
+                allowed_path = validate_file_path(str(real_path))
+
+                if is_temporary_file:
+                    try:
+                        temp_root = Path(tempfile.gettempdir()).resolve()
+                        allowed_path = allowed_path or real_path.is_relative_to(temp_root)
+                    except Exception:
+                        # フォールバック: 仮に許可されていない扱い
+                        allowed_path = False
+
+                if not path_exists or not allowed_path:
                     error_result = {
-                        "status": "error", 
-                        "error": f"アップロードされたファイルが見つからないか、無効です: {file_path}"
+                        "status": "error",
+                        "error": f"アップロードされたファイルが見つからないか、無効です: {file_path}",
                     }
                     session_queue.put(error_result)
                     self.session_results[session_id] = error_result
@@ -138,7 +163,11 @@ class StreamlitWorkflowOrchestrator:
                 )
 
                 # ファイル情報をdata_infoに含める
-                data_info = f"アップロードされたファイル: {file_path}"
+                display_name = Path(file_path).name
+                if is_temporary_file:
+                    data_info = f"アップロードされたファイル: {display_name}"
+                else:
+                    data_info = f"指定ファイル: {file_path}"
                 step_offset = 1
                 total_steps = 5
 
@@ -150,6 +179,11 @@ class StreamlitWorkflowOrchestrator:
                         "total": 5,
                     },
                 )
+            else:
+                # TDD Green: file_path=Noneの場合の適切なdata_info設定
+                data_info = "ファイルが指定されていません。"
+                step_offset = 0
+                total_steps = 4
 
             # 進捗をセッション専用キューに送信
             session_queue.put(
@@ -329,7 +363,8 @@ class StreamlitWorkflowOrchestrator:
                 import logging
 
                 logging.warning(
-                    f"Session {session_id} job did not complete within timeout",
+                    "Session %s job did not complete within timeout",
+                    session_id,
                 )
                 # TDD Green: 生きているスレッドがある場合は状態を保持
                 return  # 早期リターンで状態削除をスキップ

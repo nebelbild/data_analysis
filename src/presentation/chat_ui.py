@@ -14,7 +14,6 @@ from pathlib import Path
 import streamlit as st
 
 from src.infrastructure.di_container import DIContainer
-from src.presentation.file_utils import validate_file_path
 from src.presentation.session_state_manager import SessionStateManager
 from src.presentation.workflow_orchestrator import StreamlitWorkflowOrchestrator
 
@@ -50,41 +49,48 @@ def initialize_session_state() -> None:
     initialize_all_session_states()  # False: チャット, True: ファイル
 
 
-def save_uploaded_file_to_disk(uploaded_file) -> str | None:
-    """アップロードファイルをディスクに保存
+def _cleanup_upload_if_needed() -> None:
+    """現在のセッションでアップロードした一時ファイルを削除"""
+    if not SessionStateManager.is_selected_file_temporary():
+        return
+
+    from src.infrastructure.file_lifecycle_manager import get_file_lifecycle_manager
+
+    session_id = st.session_state.get("session_id", "default")
+    file_manager = get_file_lifecycle_manager()
+    file_manager.cleanup_session_files(session_id)
+
+    SessionStateManager.set_selected_file_path(None)
+    SessionStateManager.clear_file_selection_metadata()
+    SessionStateManager.clear_temp_file_path()
+
+    for attr in ["selected_file_name", "original_filename"]:
+        if hasattr(st.session_state, attr):
+            delattr(st.session_state, attr)
+
+
+def cleanup_temp_file_after_processing(file_path: str | None) -> None:
+    """処理後の一時ファイルクリーンアップ
+    
+    TDD Green: セキュリティ問題修正
     
     設計判断:
-    - セキュリティ: 安全なディレクトリに保存
-    - 一時ファイル使用: 適切なクリーンアップ
-    - 検証後保存: ファイルパス検証を実行後に保存
+    - セキュリティ修正: 任意のファイル削除を禁止
+    - Clean Architecture: インフラストラクチャ層のサービス使用
+    - 後方互換性: 既存のインターフェースを維持
     
     Args:
-        uploaded_file: Streamlitアップロードファイルオブジェクト
+        file_path: 削除対象ファイルパス（セキュリティ上、無視される）
         
-    Returns:
-        str | None: 保存されたファイルパス、失敗時はNone
-
+    Note:
+        この関数は後方互換性のために残されています。
+        実際のクリーンアップはFileLifecycleManagerが管理します。
+        既存のデータファイルを誤って削除する問題を修正済みです。
     """
-    if uploaded_file is None:
-        return None
-
-    try:
-        # データディレクトリの作成
-        data_dir = Path("data")
-        data_dir.mkdir(exist_ok=True)
-
-        # ファイル名の安全化（パストラバーサル攻撃対策）
-        safe_filename = Path(uploaded_file.name).name
-        file_path = data_dir / safe_filename
-
-        # ファイルの保存
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        return str(file_path)
-
-    except Exception:
-        return None
+    # TDD Green: セキュリティ修正
+    # 任意のファイル削除を禁止し、追跡されたファイルのみ削除するように変更
+    # file_pathパラメータは後方互換性のために残すが、実際には使用しない
+    _cleanup_upload_if_needed()
 
 
 def show_file_upload_ui() -> bool:
@@ -94,12 +100,12 @@ def show_file_upload_ui() -> bool:
 
     設計判断:
     - 単一責任原則: UIコンポーネントの統合のみ
-    - セキュリティファースト: ファイルを保存後に検証
+    - 責務分離: ファイル処理はfile_browserコンポーネントに委譲
     - 型安全性: 明示的boolean戻り値
     - 状態管理分離: SessionStateManager使用
 
     Returns:
-        bool: ファイルがアップロードされた場合True
+        bool: ファイルが選択された場合True
 
     Raises:
         なし - UI層ではエラーを投げない設計
@@ -107,25 +113,22 @@ def show_file_upload_ui() -> bool:
     """
     from src.presentation.components.file_browser import render_file_browser
 
-    uploaded_file = render_file_browser()
+    # render_file_browser() はファイルパス（str）を返し、内部で保存・検証を実行
+    selected_file_path = render_file_browser()
 
-    if uploaded_file is not None:
-        # ファイルをディスクに保存
-        saved_file_path = save_uploaded_file_to_disk(uploaded_file)
+    if selected_file_path is not None:
+        # file_browserが既に検証済みのため、セッション状態のみ更新
+        SessionStateManager.set_selected_file_path(selected_file_path)
+        SessionStateManager.set_file_mode(True)
 
-        if saved_file_path and validate_file_path(saved_file_path):
-            # 検証に成功した場合のみセッション状態を更新
-            SessionStateManager.set_uploaded_file(uploaded_file)
-            SessionStateManager.set_selected_file_path(saved_file_path)
-            SessionStateManager.set_file_mode(True)
-            return True
-        # 検証に失敗した場合はファイルを削除
-        if saved_file_path and Path(saved_file_path).exists():
-            try:
-                Path(saved_file_path).unlink()
-            except Exception:
-                pass  # クリーンアップの失敗は無視
-        st.error("ファイルの検証に失敗しました。許可されたファイル形式を確認してください。")
+        # ファイル名情報をセッション状態から取得（file_browserが設定済み）
+        if hasattr(st.session_state, "original_filename"):
+            st.session_state.selected_file_name = st.session_state.original_filename
+        else:
+            file_name = Path(selected_file_path).name
+            st.session_state.selected_file_name = file_name
+
+        return True
 
     return False
 
@@ -145,33 +148,51 @@ def handle_file_uploaded() -> None:
         なし - UI層での例外は適切にハンドリング
 
     """
-    uploaded_file = SessionStateManager.get_uploaded_file()
     file_path = SessionStateManager.get_selected_file_path()
 
-    if uploaded_file is not None and file_path is not None:
+    if file_path is not None:
         try:
-            file_name = uploaded_file.name
+            # ファイル名の取得（パスから、またはセッション状態から）
+            file_name = getattr(st.session_state, "selected_file_name", Path(file_path).name)
             st.success(f"✅ ファイル '{file_name}' がアップロードされ、検証されました")
 
             # ファイルプレビューの表示（オプション）
             from src.presentation.file_utils import safe_preview_file
             try:
-                preview_data = safe_preview_file(file_path)
-                if preview_data is not None:
+                preview_result = safe_preview_file(file_path)
+                if preview_result["success"] and preview_result["dataframe"] is not None:
                     st.subheader("📊 ファイルプレビュー")
-                    # preview_dataがDataFrameの場合のみhead()とemptyを使用
+
+                    # 辞書から適切にDataFrameを取得
                     import pandas as pd
-                    if isinstance(preview_data, pd.DataFrame) and not preview_data.empty:
-                        st.dataframe(preview_data.head(10))  # 最初の10行のみ表示
-            except Exception:
+                    dataframe = preview_result["dataframe"]
+                    if isinstance(dataframe, pd.DataFrame) and not dataframe.empty:
+                        st.dataframe(dataframe.head(10))  # 最初の10行のみ表示
+
+                    # 警告メッセージがあれば表示
+                    if preview_result["warnings"]:
+                        for warning in preview_result["warnings"]:
+                            st.warning(warning)
+
+                    # 情報メッセージがあれば表示
+                    if preview_result["info"]:
+                        for info in preview_result["info"]:
+                            st.info(info)
+                elif preview_result["warnings"]:
+                    # プレビュー失敗時の警告表示
+                    for warning in preview_result["warnings"]:
+                        st.warning(f"プレビューエラー: {warning}")
+
+            except (ImportError, AttributeError):
                 pass  # プレビューの失敗は無視
 
-        except AttributeError:
-            # ファイルオブジェクトに name 属性がない場合のフォールバック
+        except (AttributeError, OSError):
+            # ファイル処理中のエラー
             st.error("ファイルの処理中にエラーが発生しました")
-            SessionStateManager.set_uploaded_file(None)
             SessionStateManager.set_selected_file_path(None)
             SessionStateManager.set_file_mode(False)
+            if hasattr(st.session_state, "selected_file_name"):
+                delattr(st.session_state, "selected_file_name")
 
 
 def main() -> None:
@@ -237,7 +258,13 @@ def main() -> None:
     if submit_button and user_input:
         # ファイルパスを取得してオーケストレーターに渡す
         selected_file_path = SessionStateManager.get_selected_file_path()
-        result = orchestrator.process_user_message_async(user_input, session_id, selected_file_path)
+        is_temp_file = SessionStateManager.is_selected_file_temporary()
+        result = orchestrator.process_user_message_async(
+            user_input,
+            session_id,
+            selected_file_path,
+            is_temporary_file=is_temp_file,
+        )
 
         if result == "STARTED":
             st.session_state.job_running = True
@@ -268,6 +295,7 @@ def main() -> None:
             st.session_state.analysis_result = status.get("result")
             st.session_state.assistant_messages.append("分析が完了しました")
             st.success("✅ 分析完了！")
+            _cleanup_upload_if_needed()
             st.rerun()
 
         elif status["status"] == "error":
@@ -276,6 +304,7 @@ def main() -> None:
             error_msg = status.get("error", "不明なエラー")
             st.session_state.assistant_messages.append(f"エラー: {error_msg}")
             st.error(f"❌ エラー: {error_msg}")
+            _cleanup_upload_if_needed()
 
     # メッセージ履歴表示
     if st.session_state.user_messages or st.session_state.assistant_messages:
@@ -310,13 +339,13 @@ def main() -> None:
         st.text(f"実行中: {'はい' if st.session_state.job_running else 'いいえ'}")
 
         # アップロードされたファイル情報
-        uploaded_file = SessionStateManager.get_uploaded_file()
         file_path = SessionStateManager.get_selected_file_path()
 
-        if uploaded_file is not None and file_path is not None:
+        if file_path is not None:
             st.markdown("---")
-            st.subheader("📄 アップロードファイル")
-            st.text(f"ファイル名: {uploaded_file.name}")
+            st.subheader("📄 選択ファイル")
+            file_name = getattr(st.session_state, "selected_file_name", Path(file_path).name)
+            st.text(f"ファイル名: {file_name}")
             st.text(f"パス: {Path(file_path).name}")
 
         if st.button("🔄 セッションリセット"):
