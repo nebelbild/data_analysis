@@ -258,9 +258,10 @@ def main() -> None:
         status = orchestrator.get_job_status(session_id)
 
         if status["status"] == "progress":
-            # 進捗表示
-            progress = status.get("step", 0) / status.get("total", 1)
-            st.progress(progress, text=status.get("message", "処理中..."))
+            # TDD Green: progress_displayコンポーネントを使用
+            from src.presentation.components.progress_display import render_progress
+
+            render_progress(status)
 
             # 1秒後にリフレッシュ
             import time
@@ -278,11 +279,16 @@ def main() -> None:
             st.rerun()
 
         elif status["status"] == "error":
-            # エラー
+            # エラー処理（Task 2.3: エラーハンドリング強化）
+            from src.presentation.components.error_handler import handle_error
+
             st.session_state.job_running = False
             error_msg = status.get("error", "不明なエラー")
             st.session_state.assistant_messages.append(f"エラー: {error_msg}")
-            st.error(f"❌ エラー: {error_msg}")
+
+            # 統一的なエラー処理
+            handle_error(error_msg, session_id)
+
             _cleanup_upload_if_needed()
 
     # メッセージ履歴表示
@@ -307,9 +313,10 @@ def main() -> None:
 
     # 結果表示
     if st.session_state.analysis_result:
+        from src.presentation.components.result_viewer import render_result
+
         st.markdown("---")
-        st.subheader("📊 分析結果")
-        st.json(st.session_state.analysis_result)
+        render_result(st.session_state.analysis_result)
 
     # サイドバー: セッション情報
     with st.sidebar:
