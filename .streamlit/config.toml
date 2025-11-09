@@ -1,0 +1,20 @@
+# Streamlit Configuration
+# Task 3.4: UI/UX改善
+
+[server]
+# サーバー設定
+maxUploadSize = 200
+enableCORS = false
+enableXsrfProtection = true
+
+[theme]
+# カラーテーマ設定
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[browser]
+# ブラウザ設定
+gatherUsageStats = false

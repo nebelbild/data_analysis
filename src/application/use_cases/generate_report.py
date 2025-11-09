@@ -3,8 +3,8 @@
 from typing import Any
 from src.domain.repositories.llm_repository import LLMRepository
 from src.domain.entities.data_thread import DataThread
-from src.llms.llm_response import LLMResponse
-from src.llms.load_template import load_template
+from src.domain.entities.llm_response import LLMResponse
+from src.infrastructure.template_loader import load_template
 from src.infrastructure.renderers.renderer_interface import ReportRenderer
 
 

@@ -17,6 +17,14 @@ import streamlit as st
 from src.infrastructure.file_lifecycle_manager import get_file_lifecycle_manager
 from src.presentation.file_utils import ALLOWED_DATA_FOLDERS, validate_file_path
 from src.presentation.session_state_manager import SessionStateManager
+from src.presentation.components.file_history import (
+    add_to_recent_files,
+    get_recent_files,
+    render_recent_files_selector,
+    add_bookmark,
+    remove_bookmark,
+    get_bookmarks,
+)
 
 
 def render_file_browser() -> str | None:
@@ -78,16 +86,56 @@ def _render_folder_selection() -> str | None:
     設計判断:
     - 許可フォルダのみ表示
     - セキュリティ検証（validate_file_path）
+    - ファイル履歴機能統合
 
     """
     st.info(f"📂 許可されたフォルダ: {', '.join(ALLOWED_DATA_FOLDERS)}")
 
+    # 最近使用したファイルから選択
+    recent_files = get_recent_files()
+    if recent_files:
+        with st.expander("📋 最近使用したファイル", expanded=False):
+            selected_recent = render_recent_files_selector()
+            if selected_recent:
+                # 履歴から選択された場合
+                SessionStateManager.set_selected_file_path(selected_recent)
+                SessionStateManager.set_file_selection_metadata(source="folder", is_temporary=False)
+                SessionStateManager.clear_temp_file_path()
+                st.session_state.original_filename = os.path.basename(selected_recent)
+                st.success(f"✅ 履歴から選択: {os.path.basename(selected_recent)}")
+                return selected_recent
+
+    # ブックマーク管理
+    bookmarks = get_bookmarks()
+    if bookmarks:
+        with st.expander("🔖 ブックマーク", expanded=False):
+            for bookmark in bookmarks:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    if st.button(f"📁 {bookmark['label']}", key=f"bookmark_{bookmark['path']}"):
+                        # ブックマークから選択された場合、フォルダパスを設定
+                        st.session_state.bookmark_folder_path = bookmark['path']
+                with col2:
+                    if st.button("🗑️", key=f"remove_bookmark_{bookmark['path']}", help="削除"):
+                        remove_bookmark(bookmark['path'])
+                        st.rerun()
+
     # フォルダパス入力
+    default_folder = st.session_state.get("bookmark_folder_path", "./data/")
     folder_path = st.text_input(
         "フォルダパス",
-        value="./data/",
+        value=default_folder,
         help="許可されたフォルダのパスを入力してください",
     )
+    
+    # ブックマーク追加ボタン
+    if folder_path and os.path.exists(folder_path) and os.path.isdir(folder_path):
+        _, col2 = st.columns([4, 1])
+        with col2:
+            if st.button("🔖 追加", key="add_bookmark_btn"):
+                label = os.path.basename(folder_path.rstrip("/\\")) or "ルート"
+                add_bookmark(folder_path, label)
+                st.success(f"✅ ブックマーク追加: {label}")
 
     if not folder_path:
         return None
@@ -130,6 +178,10 @@ def _render_folder_selection() -> str | None:
                 SessionStateManager.set_file_selection_metadata(source="folder", is_temporary=False)
                 SessionStateManager.clear_temp_file_path()
                 st.session_state.original_filename = selected_file
+                
+                # 履歴に追加
+                add_to_recent_files(file_path)
+                
                 st.success(f"✅ 選択: {selected_file}")
                 return file_path
             st.error("❌ セキュリティエラー: 許可されていないパスです")

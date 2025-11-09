@@ -13,7 +13,7 @@ from typing import Any
 
 from src.domain.entities import DataThread, Review
 from src.domain.repositories.llm_repository import LLMRepository
-from src.llms.load_template import load_template
+from src.infrastructure.template_loader import load_template
 
 
 class GenerateReviewUseCase:

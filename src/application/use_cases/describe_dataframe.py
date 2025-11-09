@@ -2,7 +2,7 @@
 
 import io
 import pandas as pd
-from src.llms.load_template import load_template
+from src.infrastructure.template_loader import load_template
 
 
 def _to_markdown_safe(frame: pd.DataFrame) -> str:

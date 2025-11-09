@@ -1,12 +1,6 @@
 """Streamlit Chat UI
 
 基本的なチャットインターフェース。
-TDD Green Phase: 最小限の動作するUI。
-
-設計原則:
-- 単一責任の原則（SRP）: UI表示のみ
-- 関心の分離: ビジネスロジックはOrchestratorに委譲
-- テスト容易性: セッション状態を明示的に管理
 """
 
 from pathlib import Path
@@ -249,7 +243,13 @@ def main() -> None:
         key="user_input",
     )
 
-    col1, col2 = st.columns([1, 5])
+    # Streamlitテスト環境での互換性確保
+    columns = st.columns([1, 1, 4])
+    if len(columns) >= 3:
+        col1, col2, col3 = columns[0], columns[1], columns[2]
+    else:
+        col1, col2 = columns[0], columns[1]
+        col3 = col2  # フォールバック
 
     with col1:
         submit_button = st.button(
@@ -259,8 +259,28 @@ def main() -> None:
         )
 
     with col2:
+        # Task 3.3: キャンセルボタン
+        cancel_button = st.button(
+            "⏹️ キャンセル",
+            disabled=not st.session_state.job_running,
+            use_container_width=True,
+            help="実行中の分析をキャンセルします（制限あり）",
+        )
+
+    with col3:
         if st.session_state.job_running:
             st.info("⏳ 分析実行中...")
+            st.caption("⚠️ Pythonスレッドの制限により、完全なキャンセルはできません")
+
+    # Task 3.3: キャンセル処理
+    if cancel_button and st.session_state.job_running:
+        cancel_result = orchestrator.cancel_current_job(session_id)
+        if cancel_result["success"]:
+            st.info(f"ℹ️ {cancel_result['message']}")
+        else:
+            st.warning(f"⚠️ {cancel_result['message']}")
+            if "reason" in cancel_result:
+                st.caption(f"理由: {cancel_result['reason']}")
 
     # 分析開始処理
     if submit_button and user_input:
@@ -287,15 +307,17 @@ def main() -> None:
         status = orchestrator.get_job_status(session_id)
 
         if status["status"] == "progress":
-            # TDD Green: progress_displayコンポーネントを使用
-            from src.presentation.components.progress_display import render_progress
+            # Task 3.4: ローディングアニメーション
+            with st.spinner("分析を実行中..."):
+                # TDD Green: progress_displayコンポーネントを使用
+                from src.presentation.components.progress_display import render_progress
 
-            render_progress(status)
+                render_progress(status)
 
-            # 1秒後にリフレッシュ
-            import time
+                # 1秒後にリフレッシュ
+                import time
 
-            time.sleep(1)
+                time.sleep(1)
             st.rerun()
 
         elif status["status"] == "completed":
