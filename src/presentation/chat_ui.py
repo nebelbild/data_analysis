@@ -174,6 +174,35 @@ def handle_file_uploaded() -> None:
                 delattr(st.session_state, "selected_file_name")
 
 
+def reset_session() -> None:
+    """セッションをリセットする
+
+    TDD Green: Task 2.4のセッションリセット機能
+
+    設計判断:
+    - 実行中はリセットしない（安全性）
+    - セッションIDは保持（継続性）
+    - 一時ファイルをクリーンアップ
+    - セッション状態をクリア
+
+    """
+    # 実行中はリセットしない
+    if st.session_state.get("job_running", False):
+        return
+
+    # 一時ファイルクリーンアップ
+    _cleanup_upload_if_needed()
+
+    # セッション状態をクリア（セッションIDは保持）
+    st.session_state["user_messages"] = []
+    st.session_state["assistant_messages"] = []
+    st.session_state["analysis_result"] = None
+    st.session_state["selected_file_path"] = None
+
+    # UIをリフレッシュ（この後のコードは実行されない）
+    st.rerun()
+
+
 def main() -> None:
     """メインUI関数
 
@@ -291,25 +320,17 @@ def main() -> None:
 
             _cleanup_upload_if_needed()
 
-    # メッセージ履歴表示
+    # メッセージ履歴表示（Task 3.1: チャット履歴コンポーネント）
     if st.session_state.user_messages or st.session_state.assistant_messages:
+        from src.presentation.components.chat_history import render_chat_history
+
         st.markdown("---")
         st.subheader("📝 履歴")
 
-        # メッセージを交互に表示
-        max_len = max(
-            len(st.session_state.user_messages),
-            len(st.session_state.assistant_messages),
+        render_chat_history(
+            st.session_state.user_messages,
+            st.session_state.assistant_messages,
         )
-
-        for i in range(max_len):
-            if i < len(st.session_state.user_messages):
-                with st.chat_message("user"):
-                    st.write(st.session_state.user_messages[i])
-
-            if i < len(st.session_state.assistant_messages):
-                with st.chat_message("assistant"):
-                    st.write(st.session_state.assistant_messages[i])
 
     # 結果表示
     if st.session_state.analysis_result:
@@ -334,11 +355,9 @@ def main() -> None:
             st.text(f"ファイル名: {file_name}")
             st.text(f"パス: {Path(file_path).name}")
 
-        if st.button("🔄 セッションリセット"):
-            # セッション状態をクリア
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        # Task 2.4: セッションリセットボタン
+        if st.button("🔄 セッションリセット", disabled=st.session_state.job_running):
+            reset_session()
 
 
 if __name__ == "__main__":
