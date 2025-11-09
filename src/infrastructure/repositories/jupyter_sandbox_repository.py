@@ -313,7 +313,7 @@ print("Jupyter kernel initialized successfully")
                                 {
                                     "type": "png",
                                     "content": data["image/png"],
-                                }
+                                },
                             )
 
                         # テキスト結果の処理
@@ -322,7 +322,7 @@ print("Jupyter kernel initialized successfully")
                                 {
                                     "type": "raw",
                                     "content": data["text/plain"],
-                                }
+                                },
                             )
 
                     elif msg_type == "error":

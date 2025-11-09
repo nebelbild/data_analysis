@@ -1,0 +1,258 @@
+0001: """
+0002: File Utils
+0003: 
+0004: ファイル処理ユーティリティ。
+0005: セキュリティ、パフォーマンス、エラーハンドリングを重視。
+0006: 
+0007: TDD Green Phase: テストを通す最小限の実装。
+0008: 
+0009: 設計原則:
+0010: - 単一責任の原則（SRP）: 各関数は1つの責務のみ
+0011: - 関心の分離: セキュリティ検証とファイル読み込みを分離
+0012: - テスト容易性: 外部依存（ファイルシステム）を最小化
+0013: """
+0014: 
+0015: import os
+0016: import threading
+0017: from pathlib import Path
+0018: from typing import Any, Dict, Optional
+0019: 
+0020: import chardet
+0021: import pandas as pd
+0022: 
+0023: 
+0024: # 許可されたデータフォルダ（セキュリティ対策）
+0025: ALLOWED_DATA_FOLDERS = [
+0026:     "./data/",
+0027:     "data/",
+0028: ]
+0029: 
+0030: 
+0031: def validate_file_path(file_path: str) -> bool:
+0032:     """
+0033:     ファイルパスの安全性を検証
+0034:     
+0035:     セキュリティ対策:
+0036:     - パス正規化（Path.resolve()）
+0037:     - シンボリックリンク拒否
+0038:     - 許可フォルダ範囲チェック
+0039:     - パストラバーサル防止
+0040:     
+0041:     Args:
+0042:         file_path: 検証するファイルパス
+0043:         
+0044:     Returns:
+0045:         True: 安全なパス, False: 危険なパス
+0046:         
+0047:     設計判断:
+0048:     - 存在しないファイルはFalse（セキュリティ優先）
+0049:     - シンボリックリンクは拒否（攻撃ベクトル削減）
+0050:     """
+0051:     try:
+0052:         # シンボリックリンク検出（修正: is_symlink()を使用）
+0053:         path_obj = Path(file_path)
+0054:         if path_obj.is_symlink():
+0055:             return False
+0056:         
+0057:         # パスの正規化（シンボリックリンク解決）
+0058:         real_path = path_obj.resolve()
+0059:         
+0060:         # ファイルが存在しない場合は拒否
+0061:         if not real_path.exists():
+0062:             return False
+0063:         
+0064:         # 許可フォルダ範囲内チェック
+0065:         for allowed_folder in ALLOWED_DATA_FOLDERS:
+0066:             allowed_real = Path(allowed_folder).resolve()
+0067:             try:
+0068:                 real_path.relative_to(allowed_real)
+0069:                 return True  # 許可範囲内
+0070:             except ValueError:
+0071:                 continue
+0072:         
+0073:         return False  # 許可範囲外
+0074:         
+0075:     except (OSError, ValueError):
+0076:         return False  # パス解決エラー  # パス解決エラー
+0077: 
+0078: 
+0079: def detect_file_format(file_path: str) -> str:
+0080:     """
+0081:     ファイル形式を拡張子から判定
+0082:     
+0083:     Args:
+0084:         file_path: ファイルパス
+0085:         
+0086:     Returns:
+0087:         "csv", "excel", "tsv"のいずれか
+0088:         
+0089:     Raises:
+0090:         ValueError: 未対応の形式
+0091:         
+0092:     設計判断:
+0093:     - 拡張子ベースの判定（シンプル、高速）
+0094:     - 大文字小文字を区別しない
+0095:     """
+0096:     extension = os.path.splitext(file_path)[1].lower()
+0097:     
+0098:     if extension == ".csv":
+0099:         return "csv"
+0100:     elif extension in [".xlsx", ".xls"]:
+0101:         return "excel"
+0102:     elif extension == ".tsv":
+0103:         return "tsv"
+0104:     else:
+0105:         raise ValueError(f"未対応形式: {extension}")
+0106: 
+0107: 
+0108: def safe_preview_file(file_path: str) -> Dict[str, Any]:
+0109:     """
+0110:     大容量ファイル対応プレビュー
+0111:     
+0112:     パフォーマンス対策:
+0113:     - 1000行制限
+0114:     - エンコーディング検出（3秒タイムアウト）
+0115:     - 複数形式対応（CSV/Excel/TSV）
+0116:     - エラー行スキップ
+0117:     
+0118:     Args:
+0119:         file_path: ファイルパス
+0120:         
+0121:     Returns:
+0122:         結果辞書:
+0123:         - success: bool
+0124:         - dataframe: Optional[pd.DataFrame]
+0125:         - warnings: List[str]
+0126:         - info: List[str]
+0127:         - encoding: Optional[str]
+0128:         - file_size: int
+0129:         
+0130:     設計判断:
+0131:     - UI非依存（結果辞書を返すのみ）
+0132:     - エラーは例外ではなく結果辞書で返す
+0133:     - 部分的な成功を許容（エラー行スキップ）
+0134:     """
+0135:     result: Dict[str, Any] = {
+0136:         "success": False,
+0137:         "dataframe": None,
+0138:         "warnings": [],
+0139:         "info": [],
+0140:         "encoding": None,
+0141:         "file_size": 0,
+0142:     }
+0143:     
+0144:     try:
+0145:         # 1. ファイルサイズチェック
+0146:         file_size = os.path.getsize(file_path)
+0147:         result["file_size"] = file_size
+0148:         
+0149:         if file_size > 100 * 1024 * 1024:  # 100MB
+0150:             result["warnings"].append("大容量ファイル: プレビューのみ表示")
+0151:         
+0152:         # 2. ファイル形式判定
+0153:         file_format = detect_file_format(file_path)
+0154:         
+0155:         # 3. エンコーディング検出（CSVのみ、3秒タイムアウト）
+0156:         encoding = "utf-8"  # デフォルト
+0157:         if file_format == "csv":
+0158:             encoding = _detect_encoding_with_timeout(file_path, timeout=3.0)
+0159:             result["encoding"] = encoding
+0160:         
+0161:         # 4. 安全なプレビュー読み込み
+0162:         df: Optional[pd.DataFrame] = None
+0163:         
+0164:         if file_format == "csv":
+0165:             df = pd.read_csv(
+0166:                 file_path,
+0167:                 nrows=1000,  # 行数制限
+0168:                 encoding=encoding,
+0169:                 on_bad_lines="skip",  # エラー行スキップ
+0170:             )
+0171:         elif file_format == "excel":
+0172:             # 修正: Excelエンジン自動選択（.xls/.xlsxの両方に対応）
+0173:             df = pd.read_excel(
+0174:                 file_path,
+0175:                 nrows=1000,  # 行数制限
+0176:                 engine=None,  # Pandasに自動選択させる
+0177:             )
+0178:         elif file_format == "tsv":
+0179:             df = pd.read_csv(
+0180:                 file_path,
+0181:                 sep="\t",  # タブ区切り
+0182:                 nrows=1000,
+0183:                 encoding=encoding,
+0184:                 on_bad_lines="skip",
+0185:             )
+0186:         
+0187:         if df is not None:
+0188:             result["dataframe"] = df
+0189:             result["success"] = True
+0190:             
+0191:     except UnicodeDecodeError:
+0192:         # UTF-8フォールバック（CSVのみ）
+0193:         try:
+0194:             df = pd.read_csv(
+0195:                 file_path,
+0196:                 nrows=1000,
+0197:                 encoding="utf-8",
+0198:                 errors="ignore",  # エンコーディングエラーを無視
+0199:             )
+0200:             result["dataframe"] = df
+0201:             result["success"] = True
+0202:             result["info"].append("エンコーディングエラー: UTF-8フォールバックを使用")
+0203:         except Exception as e:
+0204:             result["warnings"].append(f"ファイル読み込みエラー: {e!s}")
+0205:     except ValueError as e:
+0206:         result["warnings"].append(f"ファイル形式エラー: {e!s}")
+0207:     except FileNotFoundError:
+0208:         result["warnings"].append("ファイルが見つかりません")
+0209:     except Exception as e:
+0210:         result["warnings"].append(f"ファイル読み込みエラー: {e!s}")
+0211:     
+0212:     return result
+0213: 
+0214: 
+0215: def _detect_encoding_with_timeout(
+0216:     file_path: str, 
+0217:     timeout: float = 3.0
+0218: ) -> str:
+0219:     """
+0220:     エンコーディング検出（タイムアウト付き）
+0221:     
+0222:     Windows対応:
+0223:     - signal.alarm()は使用不可
+0224:     - threading.Threadでタイムアウト実装
+0225:     
+0226:     Args:
+0227:         file_path: ファイルパス
+0228:         timeout: タイムアウト秒数
+0229:         
+0230:     Returns:
+0231:         検出されたエンコーディング（デフォルト: utf-8）
+0232:         
+0233:     設計判断:
+0234:     - 先頭32KBのみ読み込み（パフォーマンス）
+0235:     - タイムアウト時はUTF-8フォールバック
+0236:     """
+0237:     detected_encoding = ["utf-8"]  # リストで共有（スレッド間）
+0238:     
+0239:     def detect_task() -> None:
+0240:         try:
+0241:             with open(file_path, "rb") as f:
+0242:                 sample = f.read(32 * 1024)  # 32KB制限
+0243:             
+0244:             detected = chardet.detect(sample)
+0245:             detected_encoding[0] = detected.get("encoding", "utf-8") or "utf-8"
+0246:         except Exception:
+0247:             detected_encoding[0] = "utf-8"
+0248:     
+0249:     # threading.Threadで3秒タイムアウト
+0250:     detect_thread = threading.Thread(target=detect_task, daemon=True)
+0251:     detect_thread.start()
+0252:     detect_thread.join(timeout=timeout)  # タイムアウト待機
+0253:     
+0254:     if detect_thread.is_alive():
+0255:         # タイムアウト時はUTF-8フォールバック
+0256:         return "utf-8"
+0257:     
+0258:     return detected_encoding[0]

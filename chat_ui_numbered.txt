@@ -1,0 +1,273 @@
+0001: """Streamlit Chat UI
+0002: 
+0003: 基本的なチャットインターフェース。
+0004: TDD Green Phase: 最小限の動作するUI。
+0005: 
+0006: 設計原則:
+0007: - 単一責任の原則（SRP）: UI表示のみ
+0008: - 関心の分離: ビジネスロジックはOrchestratorに委譲
+0009: - テスト容易性: セッション状態を明示的に管理
+0010: """
+0011: 
+0012: import streamlit as st
+0013: 
+0014: from src.infrastructure.di_container import DIContainer
+0015: from src.presentation.components.file_browser import render_file_browser
+0016: from src.presentation.workflow_orchestrator import StreamlitWorkflowOrchestrator
+0017: 
+0018: 
+0019: @st.cache_resource
+0020: def get_orchestrator() -> StreamlitWorkflowOrchestrator:
+0021:     """オーケストレータの永続化
+0022: 
+0023:     設計判断:
+0024:     - @st.cache_resourceでアプリ全体で共有
+0025:     - Streamlit再実行時も永続化
+0026: 
+0027:     Returns:
+0028:         StreamlitWorkflowOrchestrator: 永続化されたインスタンス
+0029: 
+0030:     """
+0031:     di_container = DIContainer()
+0032:     return StreamlitWorkflowOrchestrator(di_container)
+0033: 
+0034: 
+0035: def initialize_session_state() -> None:
+0036:     """セッション状態の初期化
+0037: 
+0038:     TDD Blue Phase: セッション状態管理の責務分離
+0039: 
+0040:     設計判断:
+0041:     - 依存性逆転: SessionStateManager に委譲
+0042:     - 単一責任原則: 初期化の統括のみ
+0043:     - 保守性: 状態管理ロジックの一元化
+0044:     """
+0045:     from src.presentation.session_state_manager import initialize_all_session_states
+0046: 
+0047:     initialize_all_session_states()  # False: チャット, True: ファイル
+0048: 
+0049: 
+0050: def show_file_upload_ui() -> bool:
+0051:     """ファイルアップロードUIの表示
+0052: 
+0053:     TDD Blue Phase: クリーンアーキテクチャ・責務分離・型安全性
+0054: 
+0055:     設計判断:
+0056:     - 単一責任原則: UIコンポーネントの統合のみ
+0057:     - 依存性逆転: ファイルブラウザーとセッション管理に委譲
+0058:     - 型安全性: 明示的boolean戻り値
+0059:     - 状態管理分離: SessionStateManager使用
+0060: 
+0061:     Returns:
+0062:         bool: ファイルがアップロードされた場合True
+0063: 
+0064:     Raises:
+0065:         なし - UI層ではエラーを投げない設計
+0066: 
+0067:     """
+0068:     from src.presentation.components.file_browser import (
+0069:         render_file_browser,
+0070:         validate_uploaded_file,
+0071:     )
+0072:     from src.presentation.session_state_manager import SessionStateManager
+0073: 
+0074:     uploaded_file = render_file_browser()
+0075: 
+0076:     if uploaded_file is not None and validate_uploaded_file(uploaded_file):
+0077:         SessionStateManager.set_uploaded_file(uploaded_file)
+0078:         SessionStateManager.set_file_mode(True)
+0079:         return True
+0080: 
+0081:     return False
+0082: 
+0083: 
+0084: def handle_file_uploaded() -> None:
+0085:     """ファイルアップロード後の処理
+0086: 
+0087:     TDD Blue Phase: エラーハンドリング・ユーザビリティ・責務分離
+0088: 
+0089:     設計判断:
+0090:     - 単一責任原則: ファイルアップロード成功時の通知のみ
+0091:     - エラーハンドリング: None チェックと安全な属性アクセス
+0092:     - ユーザビリティ: 成功メッセージの表示
+0093:     - 状態管理分離: SessionStateManager使用
+0094: 
+0095:     Raises:
+0096:         なし - UI層での例外は適切にハンドリング
+0097: 
+0098:     """
+0099:     from src.presentation.session_state_manager import SessionStateManager
+0100: 
+0101:     uploaded_file = SessionStateManager.get_uploaded_file()
+0102: 
+0103:     if uploaded_file is not None:
+0104:         try:
+0105:             file_name = uploaded_file.name
+0106:             st.success(f"ファイル '{file_name}' をアップロードしました")
+0107: 
+0108:             # セッション状態を更新してファイルが選択されたことを示す
+0109:             SessionStateManager.set_selected_file_path(file_name)
+0110:             SessionStateManager.set_file_mode(True)
+0111:         except AttributeError:
+0112:             # ファイルオブジェクトに name 属性がない場合のフォールバック
+0113:             st.error("ファイルの処理中にエラーが発生しました")
+0114:             SessionStateManager.set_uploaded_file(None)
+0115:             SessionStateManager.set_file_mode(False)
+0116: 
+0117: 
+0118: def main() -> None:
+0119:     """メインUI関数
+0120: 
+0121:     設計判断:
+0122:     - 関数ベースの構成（Streamlitの推奨パターン）
+0123:     - トップダウンの読みやすい構造
+0124:     """
+0125:     # ページ設定
+0126:     st.set_page_config(
+0127:         page_title="DataAnalysisAgent",
+0128:         page_icon="📊",
+0129:         layout="wide",
+0130:         initial_sidebar_state="expanded",
+0131:     )
+0132: 
+0133:     # セッション状態初期化
+0134:     initialize_session_state()
+0135: 
+0136:     # オーケストレータ取得
+0137:     orchestrator = get_orchestrator()
+0138:     session_id = st.session_state.session_id
+0139: 
+0140:     # タイトル
+0141:     st.title("📊 DataAnalysisAgent")
+0142:     st.markdown("AIを活用したデータ分析自動化エージェント")
+0143: 
+0144:     # メインコンテンツ
+0145:     st.markdown("---")
+0146: 
+0147:     # ファイルアップロード
+0148:     st.subheader("📁 データファイル")
+0149:     uploaded_file = render_file_browser()
+0150: 
+0151:     # ファイルがアップロードされた場合の処理
+0152:     if uploaded_file:
+0153:         st.success(f"✅ ファイル '{uploaded_file.name}' がアップロードされました")
+0154: 
+0155:         # セッション状態にファイル情報を保存
+0156:         st.session_state.uploaded_file = uploaded_file
+0157:         st.session_state.uploaded_file_name = uploaded_file.name
+0158: 
+0159:     # チャット入力エリア
+0160:     st.subheader("💬 分析要求")
+0161: 
+0162:     user_input = st.text_input(
+0163:         "分析したい内容を入力してください:",
+0164:         placeholder="例: データを詳しく分析して、散布図と相関行列を生成してください",
+0165:         disabled=st.session_state.job_running,
+0166:         key="user_input",
+0167:     )
+0168: 
+0169:     col1, col2 = st.columns([1, 5])
+0170: 
+0171:     with col1:
+0172:         submit_button = st.button(
+0173:             "🚀 分析開始",
+0174:             disabled=st.session_state.job_running or not user_input,
+0175:             use_container_width=True,
+0176:         )
+0177: 
+0178:     with col2:
+0179:         if st.session_state.job_running:
+0180:             st.info("⏳ 分析実行中...")
+0181: 
+0182:     # 分析開始処理
+0183:     if submit_button and user_input:
+0184:         result = orchestrator.process_user_message_async(user_input, session_id)
+0185: 
+0186:         if result == "STARTED":
+0187:             st.session_state.job_running = True
+0188:             st.session_state.user_messages.append(user_input)
+0189:             st.success("✅ 分析を開始しました")
+0190:             st.rerun()
+0191:         else:
+0192:             st.error(f"❌ {result}")
+0193: 
+0194:     # 進捗確認
+0195:     if st.session_state.job_running:
+0196:         status = orchestrator.get_job_status(session_id)
+0197: 
+0198:         if status["status"] == "progress":
+0199:             # 進捗表示
+0200:             progress = status.get("step", 0) / status.get("total", 1)
+0201:             st.progress(progress, text=status.get("message", "処理中..."))
+0202: 
+0203:             # 1秒後にリフレッシュ
+0204:             import time
+0205: 
+0206:             time.sleep(1)
+0207:             st.rerun()
+0208: 
+0209:         elif status["status"] == "completed":
+0210:             # 完了
+0211:             st.session_state.job_running = False
+0212:             st.session_state.analysis_result = status.get("result")
+0213:             st.session_state.assistant_messages.append("分析が完了しました")
+0214:             st.success("✅ 分析完了！")
+0215:             st.rerun()
+0216: 
+0217:         elif status["status"] == "error":
+0218:             # エラー
+0219:             st.session_state.job_running = False
+0220:             error_msg = status.get("error", "不明なエラー")
+0221:             st.session_state.assistant_messages.append(f"エラー: {error_msg}")
+0222:             st.error(f"❌ エラー: {error_msg}")
+0223: 
+0224:     # メッセージ履歴表示
+0225:     if st.session_state.user_messages or st.session_state.assistant_messages:
+0226:         st.markdown("---")
+0227:         st.subheader("📝 履歴")
+0228: 
+0229:         # メッセージを交互に表示
+0230:         max_len = max(
+0231:             len(st.session_state.user_messages),
+0232:             len(st.session_state.assistant_messages),
+0233:         )
+0234: 
+0235:         for i in range(max_len):
+0236:             if i < len(st.session_state.user_messages):
+0237:                 with st.chat_message("user"):
+0238:                     st.write(st.session_state.user_messages[i])
+0239: 
+0240:             if i < len(st.session_state.assistant_messages):
+0241:                 with st.chat_message("assistant"):
+0242:                     st.write(st.session_state.assistant_messages[i])
+0243: 
+0244:     # 結果表示
+0245:     if st.session_state.analysis_result:
+0246:         st.markdown("---")
+0247:         st.subheader("📊 分析結果")
+0248:         st.json(st.session_state.analysis_result)
+0249: 
+0250:     # サイドバー: セッション情報
+0251:     with st.sidebar:
+0252:         st.header("ℹ️ セッション情報")
+0253:         st.text(f"Session ID: {session_id[:8]}...")
+0254:         st.text(f"実行中: {'はい' if st.session_state.job_running else 'いいえ'}")
+0255: 
+0256:         # アップロードされたファイル情報
+0257:         if (
+0258:             hasattr(st.session_state, "uploaded_file_name")
+0259:             and st.session_state.uploaded_file_name
+0260:         ):
+0261:             st.markdown("---")
+0262:             st.subheader("📄 アップロードファイル")
+0263:             st.text(f"ファイル名: {st.session_state.uploaded_file_name}")
+0264: 
+0265:         if st.button("🔄 セッションリセット"):
+0266:             # セッション状態をクリア
+0267:             for key in list(st.session_state.keys()):
+0268:                 del st.session_state[key]
+0269:             st.rerun()
+0270: 
+0271: 
+0272: if __name__ == "__main__":
+0273:     main()

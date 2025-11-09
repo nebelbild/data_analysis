@@ -16,7 +16,9 @@ class GenerateReportUseCase:
     """
 
     def __init__(
-        self, llm_repository: LLMRepository, renderer: ReportRenderer | None = None
+        self,
+        llm_repository: LLMRepository,
+        renderer: ReportRenderer | None = None,
     ):
         """初期化
 
@@ -56,6 +58,12 @@ class GenerateReportUseCase:
 
         # テンプレートの読み込み
         template = load_template(template_file)
+
+        # data_infoを制限（長すぎる場合は要約）
+        max_data_info_length = 10000
+        if len(data_info) > max_data_info_length:
+            data_info = data_info[:max_data_info_length] + "...(省略)"
+
         system_message = template.render(data_info=data_info)
 
         # 基本メッセージの構築
@@ -64,12 +72,16 @@ class GenerateReportUseCase:
             {"role": "user", "content": f"タスク要求: {user_request}"},
         ]
 
-        # DataThreadの処理とメッセージ追加
-        for data_thread in process_data_threads:
+        # DataThreadの処理とメッセージ追加（最大5スレッドまで制限）
+        max_threads = 5
+        for i, data_thread in enumerate(process_data_threads[:max_threads]):
             thread_messages = self._build_thread_messages(data_thread)
             # thread_messagesを文字列形式に変換してメッセージに追加
             content_text = self._convert_thread_messages_to_text(thread_messages)
-            messages.append({"role": "user", "content": content_text})
+            if content_text.strip():  # 空でない場合のみ追加
+                messages.append(
+                    {"role": "user", "content": f"実行結果 {i + 1}:\n{content_text}"},
+                )
 
         # レポート生成
         response = self.llm_repository.generate(messages, model=model)
@@ -87,7 +99,7 @@ class GenerateReportUseCase:
             import re
 
             if response_content.strip().startswith(
-                "```markdown"
+                "```markdown",
             ) and response_content.strip().endswith("```"):
                 # 先頭の```markdownと末尾の```を削除
                 cleaned_response = re.sub(r"^```markdown\s*\n", "", response_content)
@@ -136,7 +148,7 @@ class GenerateReportUseCase:
                             "type": "input_image",
                             "image_url": f"data:image/png;base64,{result.get('data', '')}",
                         },
-                    ]
+                    ],
                 )
             elif result.get("type") == "text":
                 # テキスト結果の処理
@@ -144,13 +156,14 @@ class GenerateReportUseCase:
                     {
                         "type": "text",
                         "text": f"実行結果: {result.get('data', '')}",
-                    }
+                    },
                 )
 
         return user_contents
 
     def _convert_thread_messages_to_text(
-        self, thread_messages: list[dict[str, Any]]
+        self,
+        thread_messages: list[dict[str, Any]],
     ) -> str:
         """DataThreadメッセージをテキスト形式に変換
 
@@ -162,11 +175,27 @@ class GenerateReportUseCase:
 
         """
         text_parts = []
+        total_length = 0
+        max_length = 8000  # 各スレッドのメッセージを制限（コンテキスト制限対策）
+
         for message in thread_messages:
             if message.get("type") == "input_text" or message.get("type") == "text":
-                text_parts.append(message["text"])
+                text = message["text"]
+                # 長さ制限チェック
+                if total_length + len(text) > max_length:
+                    remaining_space = max_length - total_length
+                    if remaining_space > 100:  # 最低限のスペースがある場合のみ追加
+                        text = text[:remaining_space] + "...(省略)"
+                        text_parts.append(text)
+                    break
+                text_parts.append(text)
+                total_length += len(text)
             elif message.get("type") == "input_image":
                 # 画像URLを完全な形式でテキストに含める（テスト要件に合わせる）
-                text_parts.append(f"[画像: {message['image_url']}]")
+                image_text = f"[画像: {message['image_url']}]"
+                if total_length + len(image_text) > max_length:
+                    break
+                text_parts.append(image_text)
+                total_length += len(image_text)
 
         return "\n".join(text_parts)

@@ -43,12 +43,15 @@ class StreamlitWorkflowOrchestrator:
         # TDD Green: エラーフォールバック通知用ログ
         self.error_fallback_log: list[dict[str, Any]] = []  # スレッドID管理
 
-    def process_user_message_async(self, message: str, session_id: str) -> str:
+    def process_user_message_async(
+        self, message: str, session_id: str, file_path: str | None = None,
+    ) -> str:
         """セッション分離対応の非同期処理
 
         Args:
             message: ユーザーメッセージ
             session_id: セッションID
+            file_path: アップロードされたファイルのパス（オプション）
 
         Returns:
             "STARTED" または エラーメッセージ
@@ -73,7 +76,7 @@ class StreamlitWorkflowOrchestrator:
         # バックグラウンドスレッドで実行
         job_thread = threading.Thread(
             target=self._run_analysis_job,
-            args=(message, session_id),
+            args=(message, session_id, file_path),
             name=f"analysis_job_{session_id}",
             daemon=True,
         )
@@ -84,12 +87,15 @@ class StreamlitWorkflowOrchestrator:
 
         return "STARTED"
 
-    def _run_analysis_job(self, message: str, session_id: str) -> None:
+    def _run_analysis_job(
+        self, message: str, session_id: str, file_path: str | None = None,
+    ) -> None:
         """セッション分離されたバックグラウンド分析実行
 
         Args:
             message: ユーザーメッセージ
             session_id: セッションID
+            file_path: アップロードされたファイルのパス（オプション）
 
         """
         # セッション専用キューの存在確認（cleanup_session対策）
@@ -103,20 +109,62 @@ class StreamlitWorkflowOrchestrator:
         process_id = f"{session_id}_{thread_id}"
 
         try:
+            # ファイルがアップロードされている場合は、データ情報を取得
+            data_info = ""
+            step_offset = 0
+            total_steps = 4
+
+            if file_path:
+                # ファイルパスの再検証（セキュリティ）
+                from pathlib import Path
+                from src.presentation.file_utils import validate_file_path
+                
+                if not Path(file_path).exists() or not validate_file_path(file_path):
+                    error_result = {
+                        "status": "error", 
+                        "error": f"アップロードされたファイルが見つからないか、無効です: {file_path}"
+                    }
+                    session_queue.put(error_result)
+                    self.session_results[session_id] = error_result
+                    return
+
+                session_queue.put(
+                    {
+                        "status": "progress",
+                        "message": "データファイル情報を取得中...",
+                        "step": 1,
+                        "total": 5,
+                    },
+                )
+
+                # ファイル情報をdata_infoに含める
+                data_info = f"アップロードされたファイル: {file_path}"
+                step_offset = 1
+                total_steps = 5
+
+                session_queue.put(
+                    {
+                        "status": "progress",
+                        "message": "データファイル情報を取得しました",
+                        "step": 2,
+                        "total": 5,
+                    },
+                )
+
             # 進捗をセッション専用キューに送信
             session_queue.put(
                 {
                     "status": "progress",
                     "message": "計画生成中...",
-                    "step": 1,
-                    "total": 4,
+                    "step": 1 + step_offset,
+                    "total": total_steps,
                 },
             )
 
             # 既存Use Caseの同期呼び出し
             plan_use_case = self.di_container.get_generate_plan_use_case()
             plan_result = plan_use_case.execute(
-                data_info="",
+                data_info=data_info,
                 user_request=message,
                 model="gpt-4o-mini",
             )
@@ -125,14 +173,14 @@ class StreamlitWorkflowOrchestrator:
                 {
                     "status": "progress",
                     "message": "コード生成中...",
-                    "step": 2,
-                    "total": 4,
+                    "step": 2 + step_offset,
+                    "total": total_steps,
                 },
             )
 
             code_use_case = self.di_container.get_generate_code_use_case()
             code_result = code_use_case.execute(
-                data_info="",
+                data_info=data_info,
                 user_request=message,
                 model="gpt-4o-mini",
             )
@@ -141,8 +189,8 @@ class StreamlitWorkflowOrchestrator:
                 {
                     "status": "progress",
                     "message": "コード実行中...",
-                    "step": 3,
-                    "total": 4,
+                    "step": 3 + step_offset,
+                    "total": total_steps,
                 },
             )
 
@@ -158,14 +206,14 @@ class StreamlitWorkflowOrchestrator:
                 {
                     "status": "progress",
                     "message": "レポート生成中...",
-                    "step": 4,
-                    "total": 4,
+                    "step": 4 + step_offset,
+                    "total": total_steps,
                 },
             )
 
             report_use_case = self.di_container.get_generate_report_use_case()
             report_result = report_use_case.execute(
-                data_info="",
+                data_info=data_info,
                 user_request=message,
                 process_data_threads=[execution_result],
                 model="gpt-4o-mini",
@@ -175,6 +223,8 @@ class StreamlitWorkflowOrchestrator:
             # 最終結果をセッション状態に保存
             final_result = {
                 "status": "completed",
+                "step": total_steps,
+                "total": total_steps,
                 "result": {
                     "plan": plan_result,
                     "execution": execution_result,
@@ -187,7 +237,7 @@ class StreamlitWorkflowOrchestrator:
         except Exception as e:
             # TDD Green: 幅広い例外をキャッチして適切に処理
             error_result = {"status": "error", "error": str(e)}
-            
+
             # TDD Green: 既にキャプチャしたキューオブジェクトを使用
             try:
                 session_queue.put(error_result)
@@ -203,7 +253,7 @@ class StreamlitWorkflowOrchestrator:
                         "session_id": session_id,
                         "error": str(e),
                         "timestamp": time.time(),
-                    }
+                    },
                 )
 
         finally:
@@ -279,7 +329,7 @@ class StreamlitWorkflowOrchestrator:
                 import logging
 
                 logging.warning(
-                    f"Session {session_id} job did not complete within timeout"
+                    f"Session {session_id} job did not complete within timeout",
                 )
                 # TDD Green: 生きているスレッドがある場合は状態を保持
                 return  # 早期リターンで状態削除をスキップ
@@ -299,6 +349,7 @@ class StreamlitWorkflowOrchestrator:
 
         Returns:
             エラーログのリスト
+
         """
         return self.error_fallback_log.copy()
 

@@ -153,7 +153,7 @@ class GenerateReviewUseCase:
             [
                 {"role": "system", "content": f"stdout: {data_thread.stdout or ''}"},
                 {"role": "system", "content": f"stderr: {data_thread.stderr or ''}"},
-            ]
+            ],
         )
 
         # フィードバック要求
@@ -161,13 +161,14 @@ class GenerateReviewUseCase:
             {
                 "role": "user",
                 "content": "実行結果に対するフィードバックを提供してください。",
-            }
+            },
         )
 
         return messages
 
     def _convert_results_for_llm(
-        self, results: list[dict[str, str]]
+        self,
+        results: list[dict[str, str]],
     ) -> list[dict[str, Any]]:
         """実行結果をLLM用の形式に変換
 
@@ -197,7 +198,7 @@ class GenerateReviewUseCase:
                         "image_url": {
                             "url": f"data:image/png;base64,{result.get('data', '')}",
                         },
-                    }
+                    },
                 )
             elif result.get("type") == "text":
                 # テキスト結果
@@ -205,7 +206,7 @@ class GenerateReviewUseCase:
                     {
                         "type": "text",
                         "text": result.get("data", ""),
-                    }
+                    },
                 )
 
         return converted_results

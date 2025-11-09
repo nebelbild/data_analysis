@@ -1,0 +1,345 @@
+0001: """StreamlitWorkflowOrchestrator
+0002: 
+0003: セッション分離された非同期ワークフロー制御。
+0004: """
+0005: 
+0006: import queue
+0007: import threading
+0008: import time
+0009: from typing import Any
+0010: 
+0011: from src.infrastructure.di_container import DIContainer
+0012: 
+0013: 
+0014: class StreamlitWorkflowOrchestrator:
+0015:     """セッション毎の分析ジョブを管理
+0016: 
+0017:     責務:
+0018:     - スレッドベースの非同期実行
+0019:     - セッション間の状態分離
+0020:     - 進捗通知とエラーハンドリング
+0021: 
+0022:     設計原則:
+0023:     - 単一責任の原則（SRP）: ワークフロー制御のみ
+0024:     - 依存性注入（DI）: DIContainerを通じてUse Caseを取得
+0025:     - スレッドセーフ: セッション毎に独立した状態管理
+0026:     """
+0027: 
+0028:     def __init__(self, di_container: DIContainer) -> None:
+0029:         """コンストラクタ
+0030: 
+0031:         Args:
+0032:             di_container: 依存性注入コンテナ
+0033: 
+0034:         """
+0035:         self.di_container = di_container
+0036: 
+0037:         # セッション毎の状態管理
+0038:         self.session_jobs: dict[str, threading.Thread] = {}
+0039:         self.session_queues: dict[str, queue.Queue[dict[str, Any]]] = {}
+0040:         self.session_results: dict[str, dict[str, Any] | None] = {}
+0041:         self.session_thread_counters: dict[str, int] = {}  # スレッドID管理
+0042: 
+0043:         # TDD Green: エラーフォールバック通知用ログ
+0044:         self.error_fallback_log: list[dict[str, Any]] = []  # スレッドID管理
+0045: 
+0046:     def process_user_message_async(
+0047:         self, message: str, session_id: str, file_path: str | None = None,
+0048:     ) -> str:
+0049:         """セッション分離対応の非同期処理
+0050: 
+0051:         Args:
+0052:             message: ユーザーメッセージ
+0053:             session_id: セッションID
+0054:             file_path: アップロードされたファイルのパス（オプション）
+0055: 
+0056:         Returns:
+0057:             "STARTED" または エラーメッセージ
+0058: 
+0059:         """
+0060:         # セッション毎のジョブ状態チェック
+0061:         current_job = self.session_jobs.get(session_id)
+0062:         if current_job and current_job.is_alive():
+0063:             return "ERROR: このセッションで他の分析が実行中です"
+0064: 
+0065:         # セッション専用キューを初期化（古いメッセージをクリア）
+0066:         self.session_queues[session_id] = queue.Queue()
+0067: 
+0068:         # セッション結果をクリア
+0069:         self.session_results[session_id] = None
+0070: 
+0071:         # セッション毎のスレッドカウンターを初期化
+0072:         if session_id not in self.session_thread_counters:
+0073:             self.session_thread_counters[session_id] = 0
+0074:         self.session_thread_counters[session_id] += 1
+0075: 
+0076:         # バックグラウンドスレッドで実行
+0077:         job_thread = threading.Thread(
+0078:             target=self._run_analysis_job,
+0079:             args=(message, session_id, file_path),
+0080:             name=f"analysis_job_{session_id}",
+0081:             daemon=True,
+0082:         )
+0083:         job_thread.start()
+0084: 
+0085:         # セッション毎にジョブを記録
+0086:         self.session_jobs[session_id] = job_thread
+0087: 
+0088:         return "STARTED"
+0089: 
+0090:     def _run_analysis_job(
+0091:         self, message: str, session_id: str, file_path: str | None = None,
+0092:     ) -> None:
+0093:         """セッション分離されたバックグラウンド分析実行
+0094: 
+0095:         Args:
+0096:             message: ユーザーメッセージ
+0097:             session_id: セッションID
+0098:             file_path: アップロードされたファイルのパス（オプション）
+0099: 
+0100:         """
+0101:         # セッション専用キューの存在確認（cleanup_session対策）
+0102:         session_queue = self.session_queues.get(session_id)
+0103:         if not session_queue:
+0104:             # キューが削除されている場合は静かに終了
+0105:             return
+0106: 
+0107:         # セッション固有のIDを生成
+0108:         thread_id = self.session_thread_counters.get(session_id, 1)
+0109:         process_id = f"{session_id}_{thread_id}"
+0110: 
+0111:         try:
+0112:             # ファイルがアップロードされている場合は、データ情報を取得
+0113:             data_info = ""
+0114:             step_offset = 0
+0115:             total_steps = 4
+0116: 
+0117:             if file_path:
+0118:                 session_queue.put(
+0119:                     {
+0120:                         "status": "progress",
+0121:                         "message": "データファイル情報を取得中...",
+0122:                         "step": 1,
+0123:                         "total": 5,
+0124:                     },
+0125:                 )
+0126: 
+0127:                 # ファイル情報をdata_infoに含める
+0128:                 data_info = f"アップロードされたファイル: {file_path}"
+0129:                 step_offset = 1
+0130:                 total_steps = 5
+0131: 
+0132:                 session_queue.put(
+0133:                     {
+0134:                         "status": "progress",
+0135:                         "message": "データファイル情報を取得しました",
+0136:                         "step": 2,
+0137:                         "total": 5,
+0138:                     },
+0139:                 )
+0140: 
+0141:             # 進捗をセッション専用キューに送信
+0142:             session_queue.put(
+0143:                 {
+0144:                     "status": "progress",
+0145:                     "message": "計画生成中...",
+0146:                     "step": 1 + step_offset,
+0147:                     "total": total_steps,
+0148:                 },
+0149:             )
+0150: 
+0151:             # 既存Use Caseの同期呼び出し
+0152:             plan_use_case = self.di_container.get_generate_plan_use_case()
+0153:             plan_result = plan_use_case.execute(
+0154:                 data_info=data_info,
+0155:                 user_request=message,
+0156:                 model="gpt-4o-mini",
+0157:             )
+0158: 
+0159:             session_queue.put(
+0160:                 {
+0161:                     "status": "progress",
+0162:                     "message": "コード生成中...",
+0163:                     "step": 2 + step_offset,
+0164:                     "total": total_steps,
+0165:                 },
+0166:             )
+0167: 
+0168:             code_use_case = self.di_container.get_generate_code_use_case()
+0169:             code_result = code_use_case.execute(
+0170:                 data_info=data_info,
+0171:                 user_request=message,
+0172:                 model="gpt-4o-mini",
+0173:             )
+0174: 
+0175:             session_queue.put(
+0176:                 {
+0177:                     "status": "progress",
+0178:                     "message": "コード実行中...",
+0179:                     "step": 3 + step_offset,
+0180:                     "total": total_steps,
+0181:                 },
+0182:             )
+0183: 
+0184:             execute_use_case = self.di_container.get_execute_code_use_case()
+0185:             execution_result = execute_use_case.execute(
+0186:                 process_id=process_id,  # セッション固有ID使用
+0187:                 thread_id=thread_id,  # セッション固有スレッドID使用
+0188:                 code=code_result.code,
+0189:                 user_request=message,
+0190:             )
+0191: 
+0192:             session_queue.put(
+0193:                 {
+0194:                     "status": "progress",
+0195:                     "message": "レポート生成中...",
+0196:                     "step": 4 + step_offset,
+0197:                     "total": total_steps,
+0198:                 },
+0199:             )
+0200: 
+0201:             report_use_case = self.di_container.get_generate_report_use_case()
+0202:             report_result = report_use_case.execute(
+0203:                 data_info=data_info,
+0204:                 user_request=message,
+0205:                 process_data_threads=[execution_result],
+0206:                 model="gpt-4o-mini",
+0207:                 output_dir="./output",
+0208:             )
+0209: 
+0210:             # 最終結果をセッション状態に保存
+0211:             final_result = {
+0212:                 "status": "completed",
+0213:                 "step": total_steps,
+0214:                 "total": total_steps,
+0215:                 "result": {
+0216:                     "plan": plan_result,
+0217:                     "execution": execution_result,
+0218:                     "report": report_result,
+0219:                 },
+0220:             }
+0221:             session_queue.put(final_result)
+0222:             self.session_results[session_id] = final_result
+0223: 
+0224:         except Exception as e:
+0225:             # TDD Green: 幅広い例外をキャッチして適切に処理
+0226:             error_result = {"status": "error", "error": str(e)}
+0227: 
+0228:             # TDD Green: 既にキャプチャしたキューオブジェクトを使用
+0229:             try:
+0230:                 session_queue.put(error_result)
+0231:                 # 辞書が残っている場合は結果も保存
+0232:                 if session_id in self.session_results:
+0233:                     self.session_results[session_id] = error_result
+0234:             except Exception:
+0235:                 # キューオブジェクトも使用不可能な場合のフォールバック
+0236:                 if not hasattr(self, "error_fallback_log"):
+0237:                     self.error_fallback_log = []
+0238:                 self.error_fallback_log.append(
+0239:                     {
+0240:                         "session_id": session_id,
+0241:                         "error": str(e),
+0242:                         "timestamp": time.time(),
+0243:                     },
+0244:                 )
+0245: 
+0246:         finally:
+0247:             # ジョブ完了時にスレッド参照をクリア（遅延削除）
+0248:             # 注: すぐに削除すると、完了直後の重複チェックが機能しない
+0249:             time.sleep(0.1)  # 短い遅延を入れて、完了状態を確認可能にする
+0250:             if session_id in self.session_jobs:
+0251:                 del self.session_jobs[session_id]
+0252: 
+0253:     def get_job_status(self, session_id: str) -> dict[str, Any]:
+0254:         """セッション毎のジョブ状態をポーリング取得
+0255: 
+0256:         Args:
+0257:             session_id: セッションID
+0258: 
+0259:         Returns:
+0260:             ジョブ状態辞書
+0261: 
+0262:         """
+0263:         # セッション専用キューから取得
+0264:         session_queue = self.session_queues.get(session_id)
+0265:         if not session_queue:
+0266:             return {"status": "idle"}
+0267: 
+0268:         try:
+0269:             return session_queue.get_nowait()
+0270:         except queue.Empty:
+0271:             # キューが空の場合はスレッド状態を確認
+0272:             current_job = self.session_jobs.get(session_id)
+0273:             if current_job and current_job.is_alive():
+0274:                 return {"status": "running"}
+0275:             if self.session_results.get(session_id):
+0276:                 # 完了結果が保存されている場合
+0277:                 return self.session_results[session_id]  # type: ignore[return-value]
+0278:             return {"status": "idle"}
+0279: 
+0280:     def cancel_current_job(self, session_id: str) -> dict[str, Any]:
+0281:         """セッション毎のジョブキャンセル（制限あり）
+0282: 
+0283:         Args:
+0284:             session_id: セッションID
+0285: 
+0286:         Returns:
+0287:             キャンセル結果辞書
+0288: 
+0289:         """
+0290:         current_job = self.session_jobs.get(session_id)
+0291:         if current_job and current_job.is_alive():
+0292:             # Pythonスレッドは強制終了不可のため、協調的終了のみ
+0293:             return {
+0294:                 "success": False,
+0295:                 "message": f"セッション {session_id}: ジョブキャンセル要求（制限あり）",
+0296:                 "reason": "Python threading limitations",
+0297:             }
+0298:         return {"success": True, "message": "キャンセル対象のジョブがありません"}
+0299: 
+0300:     def cleanup_session(self, session_id: str) -> None:
+0301:         """セッション終了時のクリーンアップ
+0302: 
+0303:         Args:
+0304:             session_id: セッションID
+0305: 
+0306:         """
+0307:         # 実行中ジョブがある場合は完了を待つ（タイムアウト付き）
+0308:         current_job = self.session_jobs.get(session_id)
+0309:         if current_job and current_job.is_alive():
+0310:             current_job.join(timeout=1.0)  # 1秒待機
+0311: 
+0312:             # TDD Green: タイムアウト後の強制終了処理を追加
+0313:             if current_job.is_alive():
+0314:                 # スレッドは直接終了できないため、強制フラグを設定
+0315:                 # 実際の実装では、WorkerThreadでstop_eventなどを使用
+0316:                 import logging
+0317: 
+0318:                 logging.warning(
+0319:                     f"Session {session_id} job did not complete within timeout",
+0320:                 )
+0321:                 # TDD Green: 生きているスレッドがある場合は状態を保持
+0322:                 return  # 早期リターンで状態削除をスキップ
+0323: 
+0324:         # ジョブ、キュー、結果、カウンターをクリア（スレッドが停止した場合のみ）
+0325:         if session_id in self.session_jobs:
+0326:             del self.session_jobs[session_id]
+0327:         if session_id in self.session_queues:
+0328:             del self.session_queues[session_id]
+0329:         if session_id in self.session_results:
+0330:             del self.session_results[session_id]
+0331:         if session_id in self.session_thread_counters:
+0332:             del self.session_thread_counters[session_id]
+0333: 
+0334:     def get_error_fallback_log(self) -> list[dict[str, Any]]:
+0335:         """エラーフォールバックログをUI向けに取得
+0336: 
+0337:         Returns:
+0338:             エラーログのリスト
+0339: 
+0340:         """
+0341:         return self.error_fallback_log.copy()
+0342: 
+0343:     def clear_error_fallback_log(self) -> None:
+0344:         """エラーフォールバックログをクリア"""
+0345:         self.error_fallback_log.clear()

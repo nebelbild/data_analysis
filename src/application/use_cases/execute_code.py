@@ -137,7 +137,8 @@ class ExecuteCodeUseCase:
         )
 
     def _convert_execution_results(
-        self, raw_results: list[Any]
+        self,
+        raw_results: list[Any],
     ) -> list[dict[str, str]]:
         """実行結果を標準形式に変換
 
@@ -169,14 +170,14 @@ class ExecuteCodeUseCase:
                         {
                             "type": "image",
                             "data": result.get("content", ""),
-                        }
+                        },
                     )
                 elif result_type == "raw":
                     converted_results.append(
                         {
                             "type": "text",
                             "data": result.get("content", ""),
-                        }
+                        },
                     )
             elif hasattr(result, "png") and result.png:
                 # オブジェクト形式の場合（E2B形式）
@@ -184,7 +185,7 @@ class ExecuteCodeUseCase:
                     {
                         "type": "image",
                         "data": result.png,
-                    }
+                    },
                 )
             elif hasattr(result, "text"):
                 # テキスト結果
@@ -192,7 +193,7 @@ class ExecuteCodeUseCase:
                     {
                         "type": "text",
                         "data": result.text,
-                    }
+                    },
                 )
 
         return converted_results

@@ -68,7 +68,10 @@ class GenerateCodeUseCase:
         """
         # 1. 基本メッセージの構築
         messages = self._build_base_messages(
-            data_info, user_request, remote_save_dir, template_file
+            data_info,
+            user_request,
+            remote_save_dir,
+            template_file,
         )
 
         # 2. 前回スレッド情報の文脈追加（自己修正機能）
@@ -158,7 +161,7 @@ class GenerateCodeUseCase:
                 [
                     {"role": "system", "content": f"stdout: {previous_thread.stdout}"},
                     {"role": "system", "content": f"stderr: {previous_thread.stderr}"},
-                ]
+                ],
             )
 
         # 前回の観測結果を改善要求として追加
@@ -167,7 +170,7 @@ class GenerateCodeUseCase:
                 {
                     "role": "user",
                     "content": f"以下を参考にして、ユーザー要求を満たすコードを再生成してください: {previous_thread.observation}",
-                }
+                },
             )
 
         return messages

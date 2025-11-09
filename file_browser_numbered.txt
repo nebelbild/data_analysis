@@ -1,0 +1,100 @@
+0001: """ファイルブラウザーコンポーネント.
+0002: 
+0003: TDD Blue Phase: クリーンアーキテクチャ・Ultracite・型安全性準拠
+0004: 
+0005: 設計原則:
+0006: - 単一責任原則 (SRP): UIレンダリングのみを担当
+0007: - 開放閉鎖原則 (OCP): 新しいファイル形式に拡張可能
+0008: - 依存性逆転 (DIP): ドメイン層のバリデーションに依存
+0009: - 明示的型安全性: Ultracite基準での型ヒント徹底
+0010: """
+0011: 
+0012: from typing import Any
+0013: 
+0014: import streamlit as st
+0015: 
+0016: from src.presentation.file_utils import validate_file_path
+0017: 
+0018: 
+0019: # Ultracite基準: 型エイリアスでStreamlitファイル型を明示
+0020: UploadedFile = Any  # streamlit.UploadedFile の型エイリアス
+0021: 
+0022: # Ultracite基準: 定数は明示的に定義
+0023: SUPPORTED_FILE_TYPES: list[str] = ["csv", "xlsx", "xls", "tsv"]
+0024: UPLOADER_LABEL: str = "データファイルを選択してください"
+0025: UPLOADER_HELP: str = (
+0026:     "分析するデータファイル（CSV、Excel、TSV）をアップロードしてください"
+0027: )
+0028: UPLOADER_KEY: str = "data_file_uploader"
+0029: 
+0030: 
+0031: def render_file_browser() -> UploadedFile | None:
+0032:     """ファイルブラウザーUIコンポーネントをレンダリング
+0033: 
+0034:     設計判断:
+0035:     - プレゼンテーション層: Streamlit UI コンポーネント
+0036:     - 責務分離: UIレンダリングのみ、バリデーションは外部委譲
+0037:     - 型安全性: 明示的な戻り値型（Ultracite基準）
+0038:     - エラーハンドリング: ドメイン層での検証
+0039: 
+0040:     Returns:
+0041:         Optional[UploadedFile]: アップロードされたファイルオブジェクト
+0042: 
+0043:     Raises:
+0044:         なし - UI層ではエラーを投げない設計
+0045: 
+0046:     クリーンアーキテクチャ:
+0047:     - プレゼンテーション層: Streamlit UIコンポーネント
+0048:     - ドメイン層: validate_file_path による検証
+0049:     - インフラ層: Streamlit file_uploader
+0050: 
+0051:     """
+0052:     uploaded_file = st.file_uploader(
+0053:         label=UPLOADER_LABEL,
+0054:         type=SUPPORTED_FILE_TYPES,
+0055:         help=UPLOADER_HELP,
+0056:         key=UPLOADER_KEY,
+0057:         on_change=None,
+0058:     )
+0059: 
+0060:     return uploaded_file
+0061: 
+0062: 
+0063: def get_file_display_name(uploaded_file: UploadedFile | None) -> str | None:
+0064:     """アップロードファイルの表示名を取得
+0065: 
+0066:     設計判断:
+0067:     - 単一責任原則: 表示名取得のみ
+0068:     - 型安全性: 明示的なNone処理
+0069:     - テスト容易性: 純粋関数として設計
+0070: 
+0071:     Args:
+0072:         uploaded_file: Streamlitのアップロードファイルオブジェクト
+0073: 
+0074:     Returns:
+0075:         Optional[str]: ファイル名、存在しない場合はNone
+0076: 
+0077:     """
+0078:     return uploaded_file.name if uploaded_file is not None else None
+0079: 
+0080: 
+0081: def validate_uploaded_file(uploaded_file: UploadedFile | None) -> bool:
+0082:     """アップロードファイルの妥当性を検証
+0083: 
+0084:     設計判断:
+0085:     - 依存性逆転原則: ドメイン層の validate_file_path に委譲
+0086:     - 単一責任原則: ファイル検証のみ
+0087:     - エラーハンドリング: boolean 戻り値でシンプルに
+0088: 
+0089:     Args:
+0090:         uploaded_file: 検証対象のアップロードファイル
+0091: 
+0092:     Returns:
+0093:         bool: ファイルが有効な場合 True
+0094: 
+0095:     """
+0096:     if uploaded_file is None:
+0097:         return False
+0098: 
+0099:     # ドメイン層での検証に委譲
+0100:     return validate_file_path(uploaded_file.name)
