@@ -31,6 +31,10 @@ temp_output.txt
 # === docsフォルダ全体を除外（絶対にGitHubにプッシュしない） ===
 docs/
 
+# === 設定・開発ツール関連のディレクトリ ===
+.kiro/
+.github/
+
 # === Python 関連 ===
 # Byte-compiled / optimized / DLL files
 __pycache__/
