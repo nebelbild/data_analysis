@@ -136,17 +136,17 @@ def show_file_upload_ui() -> bool:
 def handle_file_uploaded() -> None:
     """ファイルアップロード後の処理
 
-    TDD Blue Phase: エラーハンドリング・ユーザビリティ・責務分離
+    TDD Green: data_preview.pyコンポーネント統合
 
     設計判断:
-    - 単一責任原則: ファイルアップロード成功時の通知のみ
+    - 単一責任原則: ファイルアップロード成功時の通知とプレビュー表示
+    - 関心の分離: プレビュー表示はdata_preview.pyに委譲
     - エラーハンドリング: None チェックと安全な属性アクセス
     - ユーザビリティ: 成功メッセージの表示
     - 状態管理分離: SessionStateManager使用
 
     Raises:
         なし - UI層での例外は適切にハンドリング
-
     """
     file_path = SessionStateManager.get_selected_file_path()
 
@@ -156,35 +156,14 @@ def handle_file_uploaded() -> None:
             file_name = getattr(st.session_state, "selected_file_name", Path(file_path).name)
             st.success(f"✅ ファイル '{file_name}' がアップロードされ、検証されました")
 
-            # ファイルプレビューの表示（オプション）
-            from src.presentation.file_utils import safe_preview_file
+            # TDD Green: data_preview.pyコンポーネントを使用
+            from src.presentation.components.data_preview import render_data_preview
+
             try:
-                preview_result = safe_preview_file(file_path)
-                if preview_result["success"] and preview_result["dataframe"] is not None:
-                    st.subheader("📊 ファイルプレビュー")
-
-                    # 辞書から適切にDataFrameを取得
-                    import pandas as pd
-                    dataframe = preview_result["dataframe"]
-                    if isinstance(dataframe, pd.DataFrame) and not dataframe.empty:
-                        st.dataframe(dataframe.head(10))  # 最初の10行のみ表示
-
-                    # 警告メッセージがあれば表示
-                    if preview_result["warnings"]:
-                        for warning in preview_result["warnings"]:
-                            st.warning(warning)
-
-                    # 情報メッセージがあれば表示
-                    if preview_result["info"]:
-                        for info in preview_result["info"]:
-                            st.info(info)
-                elif preview_result["warnings"]:
-                    # プレビュー失敗時の警告表示
-                    for warning in preview_result["warnings"]:
-                        st.warning(f"プレビューエラー: {warning}")
-
-            except (ImportError, AttributeError):
-                pass  # プレビューの失敗は無視
+                render_data_preview(file_path)
+            except Exception:
+                # プレビュー表示のエラーは無視（分析は継続可能）
+                pass
 
         except (AttributeError, OSError):
             # ファイル処理中のエラー
