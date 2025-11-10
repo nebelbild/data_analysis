@@ -3,6 +3,7 @@
 Markdown コンテンツをHTMLに変換して出力
 """
 
+import base64
 import shutil
 from pathlib import Path
 from .renderer_interface import ReportRenderer
@@ -64,6 +65,8 @@ class HTMLRenderer(ReportRenderer):
             extensions=["tables"],
         )
 
+        html_content = self._inline_local_images(html_content, output_path)
+
         # HTMLテンプレートの作成
         full_html = self._create_html_template(html_content)
 
@@ -109,7 +112,8 @@ class HTMLRenderer(ReportRenderer):
         </main>
         <footer>
             <hr>
-            <p class="footer-text">このレポートは DataAnalysisAgent により自動生成されました。</p>
+            <p class="footer-text">このレポートは DataAnalysisAgent により
+            自動生成されました。</p>
         </footer>
     </div>
 </body>
@@ -190,3 +194,63 @@ blockquote {
 }
 """
             css_dest.write_text(basic_css, encoding="utf-8")
+
+    def _inline_local_images(self, html_content: str, output_path: Path) -> str:
+        """ローカル画像をdata URIに変換して埋め込む"""
+
+        import re
+
+        pattern = re.compile(
+            r"<img\s+([^>]*?)src=\"([^\"]+)\"([^>]*)>",
+            re.IGNORECASE,
+        )
+
+        def replace_src(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            src_value = match.group(2)
+            suffix = match.group(3)
+
+            normalized = src_value.strip()
+            if normalized.startswith(("http://", "https://", "data:")):
+                return match.group(0)
+
+            image_path = Path(normalized)
+            if not image_path.is_absolute():
+                image_path = (output_path / normalized).resolve()
+
+            if not image_path.exists():
+                # 解析しやすいようにログ出力
+                print(
+                    f"[DEBUG] HTMLRenderer: 画像が見つかりません: {image_path}",
+                )
+                return match.group(0)
+
+            try:
+                binary = image_path.read_bytes()
+            except OSError as exc:  # noqa: BLE001
+                print(
+                    f"[DEBUG] HTMLRenderer: 画像読み込み失敗 {image_path}: {exc}",
+                )
+                return match.group(0)
+
+            mime_type = self._guess_mime_type(image_path)
+            encoded = base64.b64encode(binary).decode("ascii")
+            data_uri = f"data:{mime_type};base64,{encoded}"
+
+            return f'<img {prefix}src="{data_uri}"{suffix}>'
+
+        return pattern.sub(replace_src, html_content)
+
+    def _guess_mime_type(self, image_path: Path) -> str:
+        """画像拡張子から簡易的にMIMEタイプを推定"""
+
+        suffix = image_path.suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            return "image/jpeg"
+        if suffix == ".gif":
+            return "image/gif"
+        if suffix == ".svg":
+            return "image/svg+xml"
+        if suffix == ".webp":
+            return "image/webp"
+        return "image/png"

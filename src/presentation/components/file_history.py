@@ -119,25 +119,29 @@ def get_bookmarks() -> list[dict[str, str]]:
 
 def render_recent_files_selector() -> str | None:
     """最近使用したファイルのセレクタを表示
-    
+
     Returns:
-        選択されたファイルパス
-        
+        ボタン操作で確定されたファイルパス
+
     TDD Green: UI統合
     """
     recent = get_recent_files()
-    
+
     if not recent:
         st.info("📋 履歴がありません")
         return None
-    
+
     selected = st.selectbox(
         "最近使用したファイル",
         recent,
+        key="recent_files_select",
         help="最近使用したファイルから選択",
     )
-    
-    return selected
+
+    if st.button("このファイルを使用", key="use_recent_file_button"):
+        return selected
+
+    return None
 
 
 def render_bookmarks_manager() -> None:

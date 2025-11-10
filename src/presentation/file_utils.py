@@ -5,8 +5,8 @@
 """
 
 import os
-from pathlib import Path
 import threading
+from pathlib import Path
 from typing import Any
 
 import chardet
@@ -15,11 +15,28 @@ import pandas as pd
 from src.infrastructure.file_lifecycle_manager import get_file_lifecycle_manager
 
 
+# プロジェクトルートを解決（src/presentation から2階層上）
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 # 許可されたデータフォルダ（セキュリティ対策）
 ALLOWED_DATA_FOLDERS = [
-    "./data/",
-    "data/",
+    str((PROJECT_ROOT / "data").resolve()),
 ]
+
+
+def resolve_with_project_root(path_str: str) -> Path:
+    """プロジェクトルート基準でパスを解決する"""
+
+    if path_str is None:
+        raise ValueError("path_str must not be None")
+
+    if path_str.strip() == "":
+        raise ValueError("empty path")
+
+    path_obj = Path(path_str).expanduser()
+    if path_obj.is_absolute():
+        return path_obj.resolve()
+    return (PROJECT_ROOT / path_obj).resolve()
 
 
 def validate_file_path(file_path: str) -> bool:
@@ -43,13 +60,17 @@ def validate_file_path(file_path: str) -> bool:
 
     """
     try:
-        # シンボリックリンク検出（修正: is_symlink()を使用）
         path_obj = Path(file_path)
-        if path_obj.is_symlink():
-            return False
+        candidate = (
+            path_obj if path_obj.is_absolute() else (PROJECT_ROOT / path_obj)
+        ).expanduser()
 
         # パスの正規化（シンボリックリンク解決）
-        real_path = path_obj.resolve()
+        real_path = candidate.resolve()
+
+        # シンボリックリンクは拒否
+        if real_path.is_symlink():
+            return False
 
         # ファイルが存在しない場合は拒否
         if not real_path.exists():

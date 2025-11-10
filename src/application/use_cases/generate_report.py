@@ -1,5 +1,6 @@
 """レポート生成ユースケース"""
 
+from pathlib import Path
 from typing import Any
 from src.domain.repositories.llm_repository import LLMRepository
 from src.domain.entities.data_thread import DataThread
@@ -102,16 +103,33 @@ class GenerateReportUseCase:
                 "```markdown",
             ) and response_content.strip().endswith("```"):
                 # 先頭の```markdownと末尾の```を削除
-                cleaned_response = re.sub(r"^```markdown\s*\n", "", response_content)
-                cleaned_response = re.sub(r"\n```\s*$", "", cleaned_response)
+                cleaned_response = re.sub(
+                    r"^```markdown\s*\n",
+                    "",
+                    response_content,
+                )
+                cleaned_response = re.sub(
+                    r"\n```\s*$",
+                    "",
+                    cleaned_response,
+                )
             else:
                 cleaned_response = response_content
         else:
             cleaned_response = str(response_content)
 
+        # 生成済みの画像をMarkdownに追加して漏れを防ぐ
+        enriched_markdown = self._append_missing_images(
+            cleaned_response,
+            process_data_threads,
+        )
+
         # レンダラーが指定されており、出力ディレクトリが指定されている場合はレンダリング
         if self.renderer is not None and output_dir is not None:
-            self.renderer.render(cleaned_response, output_dir)
+            self.renderer.render(enriched_markdown, output_dir)
+
+        if output_dir is not None:
+            self._write_markdown(enriched_markdown, output_dir)
 
         return response
 
@@ -138,15 +156,20 @@ class GenerateReportUseCase:
                 image_filename = (
                     f"{data_thread.process_id}_{data_thread.thread_id}_{i}.png"
                 )
+                image_data = result.get("data", "")
                 user_contents.extend(
                     [
                         {
                             "type": "input_text",
-                            "text": f'画像ファイル名: "{image_filename}" (レポートでは ![グラフ]({image_filename}) と記載してください)',
+                            "text": (
+                                f'画像ファイル名: "{image_filename}" '
+                                f'(レポートでは ![グラフ]({image_filename}) '
+                                "と記載してください)"
+                            ),
                         },
                         {
                             "type": "input_image",
-                            "image_url": f"data:image/png;base64,{result.get('data', '')}",
+                            "image_url": f"data:image/png;base64,{image_data}",
                         },
                     ],
                 )
@@ -199,3 +222,49 @@ class GenerateReportUseCase:
                 total_length += len(image_text)
 
         return "\n".join(text_parts)
+
+    def _append_missing_images(
+        self,
+        markdown_text: str,
+        process_data_threads: list[DataThread],
+    ) -> str:
+        """Markdownに含まれていない画像を追記する"""
+
+        if not markdown_text:
+            markdown_text = ""
+
+        import re
+
+        existing_references = {
+            Path(match).name
+            for match in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", markdown_text)
+        }
+
+        additional_lines: list[str] = []
+        for data_thread in process_data_threads:
+            image_paths = data_thread.pathes.get("images", [])
+            for image_path in image_paths:
+                image_name = Path(image_path).name
+                if image_name in existing_references:
+                    continue
+                if not Path(image_path).exists():
+                    continue
+                if not additional_lines:
+                    additional_lines.append("## 生成された可視化一覧\n")
+                additional_lines.append(f"![{image_name}]({image_name})\n")
+                existing_references.add(image_name)
+
+        if additional_lines:
+            if markdown_text and not markdown_text.endswith("\n"):
+                markdown_text += "\n"
+            markdown_text += "\n".join(additional_lines)
+
+        return markdown_text
+
+    def _write_markdown(self, markdown_text: str, output_dir: str) -> None:
+        """生成したMarkdownをファイル出力する"""
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        target = output_path / "report.md"
+        target.write_text(markdown_text, encoding="utf-8")

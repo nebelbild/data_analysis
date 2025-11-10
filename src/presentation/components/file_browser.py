@@ -11,11 +11,17 @@
 
 import os
 import tempfile
+from pathlib import Path
 
 import streamlit as st
 
 from src.infrastructure.file_lifecycle_manager import get_file_lifecycle_manager
-from src.presentation.file_utils import ALLOWED_DATA_FOLDERS, validate_file_path
+
+from src.presentation.file_utils import (
+    ALLOWED_DATA_FOLDERS,
+    resolve_with_project_root,
+    validate_file_path,
+)
 from src.presentation.session_state_manager import SessionStateManager
 from src.presentation.components.file_history import (
     add_to_recent_files,
@@ -78,18 +84,10 @@ def render_file_browser() -> str | None:
 
 
 def _render_folder_selection() -> str | None:
-    """フォルダ・ファイル選択モードのUI
-    
-    Returns:
-        選択されたファイルパス
-        
-    設計判断:
-    - 許可フォルダのみ表示
-    - セキュリティ検証（validate_file_path）
-    - ファイル履歴機能統合
+    """フォルダ・ファイル選択モードのUI"""
 
-    """
-    st.info(f"📂 許可されたフォルダ: {', '.join(ALLOWED_DATA_FOLDERS)}")
+    allowed_display = [str(Path(folder).resolve()) for folder in ALLOWED_DATA_FOLDERS]
+    st.info(f"📂 許可されたフォルダ: {', '.join(allowed_display)}")
 
     # 最近使用したファイルから選択
     recent_files = get_recent_files()
@@ -97,9 +95,11 @@ def _render_folder_selection() -> str | None:
         with st.expander("📋 最近使用したファイル", expanded=False):
             selected_recent = render_recent_files_selector()
             if selected_recent:
-                # 履歴から選択された場合
                 SessionStateManager.set_selected_file_path(selected_recent)
-                SessionStateManager.set_file_selection_metadata(source="folder", is_temporary=False)
+                SessionStateManager.set_file_selection_metadata(
+                    source="folder",
+                    is_temporary=False,
+                )
                 SessionStateManager.clear_temp_file_path()
                 st.session_state.original_filename = os.path.basename(selected_recent)
                 st.success(f"✅ 履歴から選択: {os.path.basename(selected_recent)}")
@@ -112,89 +112,107 @@ def _render_folder_selection() -> str | None:
             for bookmark in bookmarks:
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    if st.button(f"📁 {bookmark['label']}", key=f"bookmark_{bookmark['path']}"):
-                        # ブックマークから選択された場合、フォルダパスを設定
-                        st.session_state.bookmark_folder_path = bookmark['path']
+                    if st.button(
+                        f"📁 {bookmark['label']}",
+                        key=f"bookmark_{bookmark['path']}",
+                    ):
+                        st.session_state.bookmark_folder_path = bookmark["path"]
                 with col2:
-                    if st.button("🗑️", key=f"remove_bookmark_{bookmark['path']}", help="削除"):
-                        remove_bookmark(bookmark['path'])
+                    if st.button(
+                        "🗑️",
+                        key=f"remove_bookmark_{bookmark['path']}",
+                        help="削除",
+                    ):
+                        remove_bookmark(bookmark["path"])
                         st.rerun()
 
-    # フォルダパス入力
-    default_folder = st.session_state.get("bookmark_folder_path", "./data/")
+    default_folder = st.session_state.get(
+        "bookmark_folder_path",
+        ALLOWED_DATA_FOLDERS[0],
+    )
     folder_path = st.text_input(
         "フォルダパス",
         value=default_folder,
         help="許可されたフォルダのパスを入力してください",
     )
-    
-    # ブックマーク追加ボタン
-    if folder_path and os.path.exists(folder_path) and os.path.isdir(folder_path):
-        _, col2 = st.columns([4, 1])
-        with col2:
-            if st.button("🔖 追加", key="add_bookmark_btn"):
-                label = os.path.basename(folder_path.rstrip("/\\")) or "ルート"
-                add_bookmark(folder_path, label)
-                st.success(f"✅ ブックマーク追加: {label}")
 
     if not folder_path:
         return None
 
-    # フォルダの存在確認
-    if not os.path.exists(folder_path):
+    resolved_folder: Path | None = None
+    try:
+        resolved_folder = resolve_with_project_root(folder_path)
+    except ValueError:
+        resolved_folder = None
+
+    if not resolved_folder or not resolved_folder.exists():
         st.warning(f"⚠️ フォルダが見つかりません: {folder_path}")
         return None
 
-    if not os.path.isdir(folder_path):
+    if not resolved_folder.is_dir():
         st.warning(f"⚠️ フォルダではありません: {folder_path}")
         return None
 
-    # ファイル一覧取得
+    allowed_roots = [Path(folder).resolve() for folder in ALLOWED_DATA_FOLDERS]
+    if not any(resolved_folder.is_relative_to(root) for root in allowed_roots):
+        st.error("❌ 許可されたフォルダ外です")
+        return None
+
+    _, add_col = st.columns([4, 1])
+    with add_col:
+        if st.button("🔖 追加", key="add_bookmark_btn"):
+            label = resolved_folder.name or "ルート"
+            add_bookmark(str(resolved_folder), label)
+            st.success(f"✅ ブックマーク追加: {label}")
+
     try:
-        all_files = os.listdir(folder_path)
-        data_files = [
-            f
-            for f in all_files
-            if f.lower().endswith((".csv", ".xlsx", ".xls", ".tsv"))
-        ]
-
-        if not data_files:
-            st.warning("⚠️ データファイル（CSV/Excel/TSV）が見つかりません")
-            return None
-
-        # ファイル選択
-        selected_file = st.selectbox(
-            "ファイル選択",
-            data_files,
-            help="分析するファイルを選択してください",
-        )
-
-        if selected_file:
-            file_path = os.path.join(folder_path, selected_file)
-
-            # セキュリティ検証
-            if validate_file_path(file_path):
-                SessionStateManager.set_selected_file_path(file_path)
-                SessionStateManager.set_file_selection_metadata(source="folder", is_temporary=False)
-                SessionStateManager.clear_temp_file_path()
-                st.session_state.original_filename = selected_file
-                
-                # 履歴に追加
-                add_to_recent_files(file_path)
-                
-                st.success(f"✅ 選択: {selected_file}")
-                return file_path
-            st.error("❌ セキュリティエラー: 許可されていないパスです")
-            return None
-
+        all_files = os.listdir(str(resolved_folder))
     except PermissionError:
         st.error("❌ フォルダへのアクセス権限がありません")
         return None
-    except (OSError, ValueError) as e:
-        st.error(f"❌ エラー: {e}")
+    except OSError as exc:
+        st.error(f"❌ エラー: {exc}")
         return None
 
-    return None
+    data_files = [
+        f
+        for f in all_files
+        if f.lower().endswith((".csv", ".xlsx", ".xls", ".tsv"))
+    ]
+
+    if not data_files:
+        st.warning("⚠️ データファイル（CSV/Excel/TSV）が見つかりません")
+        return None
+
+    stored_file = st.session_state.get("folder_selected_file")
+    default_index = 0
+    if stored_file in data_files:
+        default_index = data_files.index(stored_file)
+
+    selected_file = st.selectbox(
+        "ファイル選択",
+        data_files,
+        index=default_index,
+        key="folder_selected_file",
+        help="分析するファイルを選択してください",
+    )
+
+    if not selected_file:
+        return None
+
+    file_path = str(resolved_folder / selected_file)
+
+    if not validate_file_path(file_path):
+        st.error("❌ セキュリティエラー: 許可されていないパスです")
+        return None
+
+    SessionStateManager.set_selected_file_path(file_path)
+    SessionStateManager.set_file_selection_metadata(source="folder", is_temporary=False)
+    SessionStateManager.clear_temp_file_path()
+    st.session_state.original_filename = selected_file
+    add_to_recent_files(file_path)
+    st.success(f"✅ 選択: {selected_file}")
+    return file_path
 
 
 def _render_file_upload(*, file_manager, session_id: str) -> str | None:

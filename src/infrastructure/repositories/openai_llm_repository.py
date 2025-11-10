@@ -235,9 +235,29 @@ class OpenAILLMRepository(LLMRepository):
 
     @staticmethod
     def _extract_latest_user_prompt(messages: list[dict[str, str]]) -> str:
+        preferred_prompt = ""
+
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+
+            content = message.get("content", "")
+            if not content:
+                continue
+
+            if "タスク要求" in content:
+                return content
+
+            if not content.startswith("実行結果") and not preferred_prompt:
+                preferred_prompt = content
+
+        if preferred_prompt:
+            return preferred_prompt
+
         for message in reversed(messages):
             if message.get("role") == "user":
                 return message.get("content", "")
+
         return ""
 
     @staticmethod
