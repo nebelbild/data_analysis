@@ -191,6 +191,9 @@ def show_plot():
     buffer.close()
     plt.close()
 
+# plt.showをカスタム関数に差し替え（LLMがplt.show()を呼び出した場合でも画像を取得）
+plt.show = show_plot
+
 print("Jupyter kernel initialized successfully")
 """
             # 初期化コードを実行し、結果を待機
@@ -262,6 +265,7 @@ print("Jupyter kernel initialized successfully")
             logger.warning("コードのデコードに失敗しました（元のコードを使用）: %s", e)
             decoded_code = code
 
+        print(f"[DEBUG] execute_code呼び出し: タイムアウト={timeout}秒")
         return self._execute_code_internal(decoded_code, timeout)
 
     def _execute_code_internal(self, code: str, timeout: int = 30) -> dict[str, Any]:
@@ -277,7 +281,10 @@ print("Jupyter kernel initialized successfully")
         """
         try:
             # コードを実行
+            print(f"[DEBUG] コード実行開始（タイムアウト: {timeout}秒）")
+            print(f"[DEBUG] コード長: {len(code)}文字")
             msg_id = self._kernel_client.execute(code)
+            print(f"[DEBUG] コード実行メッセージ送信完了: {msg_id}")
 
             # 結果を収集
             stdout_lines = []
@@ -331,14 +338,21 @@ print("Jupyter kernel initialized successfully")
 
                     elif msg_type == "status" and content["execution_state"] == "idle":
                         # 実行完了
+                        print("[DEBUG] コード実行完了（idle状態検出）")
                         execution_done = True
 
                 except Exception as e:
                     # タイムアウトまたは他の例外
                     if "Timeout" in str(e):
                         continue  # タイムアウトの場合は継続
+                    print(f"[DEBUG] メッセージ受信エラー: {e}")
                     break  # その他のエラーで終了
 
+            if not execution_done:
+                print(f"[DEBUG] タイムアウト: {timeout}秒経過")
+            
+            print(f"[DEBUG] 実行結果: stdout={len(stdout_lines)}行, stderr={len(stderr_lines)}行, results={len(results)}個")
+            
             return {
                 "stdout": "".join(stdout_lines),
                 "stderr": "".join(stderr_lines),

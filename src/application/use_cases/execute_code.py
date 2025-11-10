@@ -66,6 +66,13 @@ class ExecuteCodeUseCase:
         - 実行カウントをDataThreadのIDとして使用
 
         """
+        # 0. サンドボックスが作成されていない場合は作成
+        # Note: _sandbox_idへのアクセスは実装の詳細だが、サンドボックスの状態確認に必要
+        if not hasattr(self._sandbox_repository, '_sandbox_id') or self._sandbox_repository._sandbox_id is None:  # noqa: SLF001
+            print("[DEBUG] サンドボックスを作成中...")
+            self._sandbox_repository.create(timeout=60)
+            print("[DEBUG] サンドボックス作成完了")
+        
         # 1. サンドボックスでコード実行
         execution_result = self._sandbox_repository.execute_code(
             code=code,

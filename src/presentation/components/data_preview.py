@@ -101,7 +101,7 @@ def _render_preview_data(preview_result: dict, file_path: str) -> None:
     # データフレーム表示
     st.dataframe(
         dataframe,
-        use_container_width=True,
+        width="stretch",
         height=400,  # 固定高さで見やすく
     )
     
@@ -198,7 +198,7 @@ def _render_data_statistics(dataframe: Optional[pd.DataFrame]) -> None:
             })
         
         info_df = pd.DataFrame(column_info)
-        st.dataframe(info_df, use_container_width=True)
+        st.dataframe(info_df, width="stretch")
 
 
 def _get_display_filename(file_path: str) -> str:

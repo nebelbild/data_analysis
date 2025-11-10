@@ -21,22 +21,49 @@ def render_result(result: dict[str, Any]) -> None:
         result: 分析結果辞書
             - status: 実行ステータス
             - message: 完了メッセージ（オプション）
+            - result: ネストされた結果（plan, execution, report）
             - output_dir: 出力ディレクトリパス（オプション）
 
     """
     if not result:
+        print("[DEBUG] render_result: 結果がNone")
         return
+
+    print(f"[DEBUG] render_result: keys={list(result.keys())}")
 
     # 完了メッセージ表示
     _render_completion_message(result)
 
-    # 出力ディレクトリが指定されている場合、ファイルを表示
+    # 出力ディレクトリを探す（複数の場所を確認）
     output_dir = result.get("output_dir")
+    
+    # ネストされた結果構造の場合
+    if not output_dir and "result" in result:
+        nested_result = result["result"]
+        print(f"[DEBUG] render_result: nested result keys={list(nested_result.keys())}")
+        
+        # reportからoutput_dirを取得
+        if "report" in nested_result:
+            report = nested_result["report"]
+            print(f"[DEBUG] render_result: report type={type(report)}")
+            if hasattr(report, "output_dir"):
+                output_dir = report.output_dir
+            elif isinstance(report, dict):
+                output_dir = report.get("output_dir")
+    
+    print(f"[DEBUG] render_result: output_dir={output_dir}")
+    
     if output_dir:
         output_path = Path(output_dir)
         if output_path.exists():
+            print(f"[DEBUG] render_result: output_path exists: {output_path}")
             _render_images(output_path)
             _render_html_report(output_path)
+        else:
+            print(f"[DEBUG] render_result: output_path does not exist: {output_path}")
+            st.warning(f"⚠️ 出力ディレクトリが見つかりません: {output_path}")
+    else:
+        st.info("ℹ️ 出力ファイルが生成されませんでした")
 
 
 def _render_completion_message(result: dict[str, Any]) -> None:
@@ -55,7 +82,7 @@ def _render_images(output_path: Path) -> None:
     st.subheader("📊 生成されたグラフ")
 
     for image_file in image_files:
-        st.image(str(image_file), caption=image_file.name, use_container_width=True)
+        st.image(str(image_file), caption=image_file.name, width="stretch")
 
 
 def _render_html_report(output_path: Path) -> None:

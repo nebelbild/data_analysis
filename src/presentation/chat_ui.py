@@ -255,7 +255,7 @@ def main() -> None:
         submit_button = st.button(
             "🚀 分析開始",
             disabled=st.session_state.job_running or not user_input,
-            use_container_width=True,
+            width="stretch",
         )
 
     with col2:
@@ -263,7 +263,7 @@ def main() -> None:
         cancel_button = st.button(
             "⏹️ キャンセル",
             disabled=not st.session_state.job_running,
-            use_container_width=True,
+            width="stretch",
             help="実行中の分析をキャンセルします（制限あり）",
         )
 
@@ -287,60 +287,81 @@ def main() -> None:
         # ファイルパスを取得してオーケストレーターに渡す
         selected_file_path = SessionStateManager.get_selected_file_path()
         is_temp_file = SessionStateManager.is_selected_file_temporary()
+        print(f"[DEBUG UI] 分析開始ボタンクリック - file_path={selected_file_path}")
         result = orchestrator.process_user_message_async(
             user_input,
             session_id,
             selected_file_path,
             is_temporary_file=is_temp_file,
         )
+        print(f"[DEBUG UI] process_user_message_async結果: {result}")
 
         if result == "STARTED":
             st.session_state.job_running = True
+            st.session_state.analysis_result = None
             st.session_state.user_messages.append(user_input)
-            st.success("✅ 分析を開始しました")
+            print(f"[DEBUG UI] 分析開始 - job_runningをTrueに設定")
+            # 即座に再実行（st.success()は次の実行で表示）
             st.rerun()
         else:
             st.error(f"❌ {result}")
+            print(f"[DEBUG UI] 分析開始失敗: {result}")
 
     # 進捗確認
+    print(f"[DEBUG UI] job_running={st.session_state.job_running}")
     if st.session_state.job_running:
-        status = orchestrator.get_job_status(session_id)
+        with st.spinner("🔄 分析を実行しています..."):
+            status = orchestrator.get_job_status(session_id)
+            print(f"[DEBUG UI] ジョブステータス: {status.get('status')}, keys: {list(status.keys())}")
 
-        if status["status"] == "progress":
-            # Task 3.4: ローディングアニメーション
-            with st.spinner("分析を実行中..."):
+            # 完了状態を強制チェック（デバッグ用）
+            if status.get("status") == "idle":
+                # idleの場合、session_resultsを直接確認
+                print(f"[DEBUG UI] idle検出 - session_resultsを確認")
+                if session_id in orchestrator.session_results:
+                    status = orchestrator.session_results[session_id]
+                    print(f"[DEBUG UI] session_resultsから取得: {status.get('status')}")
+                else:
+                    # まだ結果がない場合は、ワークフロー開始待ち
+                    print(f"[DEBUG UI] ワークフロー開始待ち - 継続ポーリング")
+                    st.info("⏳ 分析を開始しています...")
+                    import time
+                    time.sleep(0.1)
+                    st.rerun()
+
+            if status["status"] == "progress" or status["status"] == "running" or status["status"] == "idle":
+                # Task 3.4: ローディングアニメーション
                 # TDD Green: progress_displayコンポーネントを使用
-                from src.presentation.components.progress_display import render_progress
+                if status["status"] == "progress":
+                    from src.presentation.components.progress_display import render_progress
+                    render_progress(status)
+                else:
+                    st.info("⏳ 分析実行中...")
 
-                render_progress(status)
+                # 即座に再実行（sleepなし）
+                st.rerun()
 
-                # 1秒後にリフレッシュ
-                import time
+            elif status["status"] == "completed":
+                # 完了
+                st.session_state.job_running = False
+                st.session_state.analysis_result = status
+                st.session_state.assistant_messages.append("分析が完了しました")
+                st.success("✅ 分析完了！")
+                _cleanup_upload_if_needed()
+                st.rerun()
 
-                time.sleep(1)
-            st.rerun()
+            elif status["status"] == "error":
+                # エラー処理（Task 2.3: エラーハンドリング強化）
+                from src.presentation.components.error_handler import handle_error
 
-        elif status["status"] == "completed":
-            # 完了
-            st.session_state.job_running = False
-            st.session_state.analysis_result = status.get("result")
-            st.session_state.assistant_messages.append("分析が完了しました")
-            st.success("✅ 分析完了！")
-            _cleanup_upload_if_needed()
-            st.rerun()
+                st.session_state.job_running = False
+                error_msg = status.get("error", "不明なエラー")
+                st.session_state.assistant_messages.append(f"エラー: {error_msg}")
 
-        elif status["status"] == "error":
-            # エラー処理（Task 2.3: エラーハンドリング強化）
-            from src.presentation.components.error_handler import handle_error
+                # 統一的なエラー処理
+                handle_error(error_msg, session_id)
 
-            st.session_state.job_running = False
-            error_msg = status.get("error", "不明なエラー")
-            st.session_state.assistant_messages.append(f"エラー: {error_msg}")
-
-            # 統一的なエラー処理
-            handle_error(error_msg, session_id)
-
-            _cleanup_upload_if_needed()
+                _cleanup_upload_if_needed()
 
     # メッセージ履歴表示（Task 3.1: チャット履歴コンポーネント）
     if st.session_state.user_messages or st.session_state.assistant_messages:
@@ -359,6 +380,7 @@ def main() -> None:
         from src.presentation.components.result_viewer import render_result
 
         st.markdown("---")
+        print(f"[DEBUG UI] 結果表示開始: keys={list(st.session_state.analysis_result.keys())}")
         render_result(st.session_state.analysis_result)
 
     # サイドバー: セッション情報
