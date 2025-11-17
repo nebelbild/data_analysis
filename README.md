@@ -110,14 +110,43 @@ Step 9: レポート生成（HTML/Markdown）
 ### 1. リポジトリのクローン
 
 ```bash
-git clone <repository-url>
-cd DataAnalysisAgent
+git clone https://github.com/nebelbild/data_analysis.git
+cd data_analysis
 ```
 
-### 2. Python環境のセットアップ
+### 2. UVパッケージマネージャーのインストール
+
+UVは高速なPythonパッケージマネージャーです。以下のいずれかの方法でインストールしてください。
+
+#### Windows（PowerShell）
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+#### macOS/Linux
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+#### pipを使用する場合
+
+```bash
+pip install uv
+```
+
+インストール後、以下のコマンドでバージョンを確認：
+
+```bash
+uv --version
+```
+
+### 3. Python環境のセットアップ
 
 ```bash
 # UV を使用した依存関係のインストール
+# .venv仮想環境が自動的に作成され、依存関係がインストールされます
 uv sync
 
 # 仮想環境をアクティブ化
@@ -126,7 +155,9 @@ source .venv/bin/activate  # Linux/Mac
 .venv\Scripts\activate     # Windows
 ```
 
-### 3. 環境変数の設定
+**注意**: `uv sync`コマンドを実行すると、`.venv`ディレクトリが自動的に作成され、`pyproject.toml`と`uv.lock`に基づいて依存関係がインストールされます。手動で仮想環境を作成する必要はありません。
+
+### 4. 環境変数の設定
 
 `.env`ファイルを作成し、以下の環境変数を設定：
 
