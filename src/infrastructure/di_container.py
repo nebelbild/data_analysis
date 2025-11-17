@@ -82,7 +82,9 @@ class DIContainer:
         return self._sandbox_repository
 
     def get_llm_repository(
-        self, api_key: str | None = None, endpoint: str | None = None
+        self,
+        api_key: str | None = None,
+        endpoint: str | None = None,
     ) -> LLMRepository:
         """LLMRepositoryのインスタンスを取得
 
@@ -112,7 +114,8 @@ class DIContainer:
             )
 
             self._llm_repository = OpenAILLMRepository(
-                api_key=api_key, endpoint=endpoint
+                api_key=api_key,
+                endpoint=endpoint,
             )
 
         return self._llm_repository

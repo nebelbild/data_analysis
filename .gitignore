@@ -28,8 +28,9 @@ temp_*.py
 test_*.txt
 temp_output.txt
 
-# === docsフォルダ全体を除外（絶対にGitHubにプッシュしない） ===
+# === docsフォルダ全体を除外（GitHubにプッシュしない） ===
 docs/
+tests/
 
 # === 設定・開発ツール関連のディレクトリ ===
 .kiro/

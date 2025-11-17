@@ -9,11 +9,12 @@
 - 条件分岐: has_resultsによるメッセージ構築の変更
 """
 
+from pathlib import Path
 from typing import Any
 
 from src.domain.entities import DataThread, Review
 from src.domain.repositories.llm_repository import LLMRepository
-from src.llms.load_template import load_template
+from src.infrastructure.template_loader import load_template
 
 
 class GenerateReviewUseCase:
@@ -37,6 +38,12 @@ class GenerateReviewUseCase:
 
         """
         self._llm_repository = llm_repository
+        self._system_limit = 8000
+        self._user_limit = 4000
+        self._code_limit = 12000
+        self._log_limit = 4000
+        self._result_limit = 2000
+        self._max_results = 6
 
     def execute(
         self,
@@ -135,25 +142,46 @@ class GenerateReviewUseCase:
 
         # 基本メッセージの構築
         messages = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_request},
-            {"role": "assistant", "content": data_thread.code or ""},
+            {
+                "role": "system",
+                "content": self._truncate_text(system_instruction, self._system_limit),
+            },
+            {
+                "role": "user",
+                "content": self._truncate_text(user_request, self._user_limit),
+            },
+            {
+                "role": "assistant",
+                "content": self._truncate_text(
+                    data_thread.code or "",
+                    self._code_limit,
+                ),
+            },
         ]
 
         # 実行結果の追加（条件付き）
         if has_results and data_thread.results:
-            results_content = self._convert_results_for_llm(data_thread.results)
-            # resultsをJSON文字列として追加（LLM互換形式）
-            import json
-
-            messages.append({"role": "system", "content": json.dumps(results_content)})
+            results_summary = self._summarize_results_for_llm(
+                data_thread.results,
+                data_thread.pathes.get("images", []),
+            )
+            if results_summary:
+                messages.append({"role": "system", "content": results_summary})
 
         # 実行ログの追加
         messages.extend(
             [
-                {"role": "system", "content": f"stdout: {data_thread.stdout or ''}"},
-                {"role": "system", "content": f"stderr: {data_thread.stderr or ''}"},
-            ]
+                {
+                    "role": "system",
+                    "content": "stdout: "
+                    + self._truncate_text(data_thread.stdout, self._log_limit),
+                },
+                {
+                    "role": "system",
+                    "content": "stderr: "
+                    + self._truncate_text(data_thread.stderr, self._log_limit),
+                },
+            ],
         )
 
         # フィードバック要求
@@ -161,51 +189,54 @@ class GenerateReviewUseCase:
             {
                 "role": "user",
                 "content": "実行結果に対するフィードバックを提供してください。",
-            }
+            },
         )
 
         return messages
 
-    def _convert_results_for_llm(
-        self, results: list[dict[str, str]]
-    ) -> list[dict[str, Any]]:
-        """実行結果をLLM用の形式に変換
+    def _summarize_results_for_llm(
+        self,
+        results: list[dict[str, str]],
+        image_paths: list[str],
+    ) -> str:
+        """実行結果をレビュー用に要約"""
 
-        Args:
-            results: データスレッドの実行結果
+        if not results:
+            return ""
 
-        Returns:
-            List[Dict[str, Any]]: LLM用に変換された結果
+        summary_lines: list[str] = []
+        images_iter = iter(image_paths)
 
-        変換ルール:
-        - PNG画像: image_url形式（base64データURLとして）
-        - テキスト: text形式（そのまま）
+        for index, result in enumerate(results[: self._max_results]):
+            result_type = result.get("type")
+            if result_type == "image":
+                path_hint = next(images_iter, "")
+                summary = "画像出力"
+                if path_hint:
+                    summary += f" -> {Path(path_hint).name}"
+                summary_lines.append(f"[{index}] {summary} (base64は省略)")
+            elif result_type == "text":
+                raw_text = str(result.get("data", ""))
+                truncated = self._truncate_text(raw_text, self._result_limit)
+                summary_lines.append(f"[{index}] テキスト出力: {truncated}")
+            else:
+                raw_repr = self._truncate_text(str(result), self._result_limit)
+                label = result_type or "unknown"
+                summary_lines.append(f"[{index}] {label}: {raw_repr}")
 
-        命名根拠:
-        - _convert_results_for_llm: LLM特有の形式変換の意図が明確
-        - for_llm: LLM用の変換であることを明示
+        omitted = len(results) - self._max_results
+        if omitted > 0:
+            summary_lines.append(f"...他{omitted}件の結果を省略しました")
 
-        """
-        converted_results = []
+        header = "実行結果概要:\n"
+        return header + "\n".join(summary_lines)
 
-        for result in results:
-            if result.get("type") == "image":
-                # PNG画像をimage_url形式に変換
-                converted_results.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{result.get('data', '')}",
-                        },
-                    }
-                )
-            elif result.get("type") == "text":
-                # テキスト結果
-                converted_results.append(
-                    {
-                        "type": "text",
-                        "text": result.get("data", ""),
-                    }
-                )
-
-        return converted_results
+    @staticmethod
+    def _truncate_text(text: str | None, limit: int) -> str:
+        if not text:
+            return ""
+        if len(text) <= limit:
+            return text
+        omitted = len(text) - limit
+        truncated = text[:limit].rstrip()
+        return f"{truncated}... (省略 {omitted}文字)"

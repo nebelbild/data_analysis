@@ -4,6 +4,7 @@ AIを活用したデータ分析自動化エージェント。クリーンアー
 
 ## 🚀 特徴
 
+- **WebベースチャットUI**: Streamlitによる対話的な分析インターフェース
 - **クリーンアーキテクチャ**: 依存性注入による疎結合設計
 - **マルチフォーマット出力**: HTML/Markdown形式でのレポート生成
 - **Jupyter Kernel統合**: IPythonカーネルによる高速なコード実行
@@ -148,7 +149,44 @@ OPENAI_DEPLOYMENT_NAME=your-deployment-name
 
 ## 🚀 使用方法
 
-### 基本的なワークフロー実行
+### チャットUIの起動（推奨）
+
+#### 起動手順
+
+```bash
+# 1. プロジェクトルートに移動
+cd C:\Users\you\work\00_proj\DataAnalysisAgent
+
+# 2. 仮想環境を有効化
+.venv\Scripts\activate  # Windows
+# または
+source .venv/bin/activate  # macOS/Linux
+
+# 3. Streamlitを起動
+streamlit run src/presentation/chat_ui.py
+```
+
+**または、起動スクリプトを使用**:
+
+```bash
+python run_chat_ui.py
+```
+
+ブラウザが自動的に開き、対話的なチャットインターフェースが表示されます。
+
+**重要**: 必ずプロジェクトルート（`DataAnalysisAgent`ディレクトリ）から起動してください。
+
+**主な機能**:
+- ファイル選択（フォルダ選択/アップロード）
+- データプレビュー
+- 対話的な分析要求
+- リアルタイム進捗表示
+- グラフとレポートの表示
+- ファイル履歴とブックマーク
+
+詳細は [チャットUI使用ガイド](docs/user_guide/chat_ui_usage.md) を参照してください。
+
+### コマンドラインでの実行
 
 ```bash
 # サンプルワークフローの実行
@@ -266,6 +304,34 @@ python -m pytest tests/e2e/ -v           # E2Eテストのみ
 
 ## 🐛 トラブルシューティング
 
+### Streamlit起動時のエラー
+
+#### ModuleNotFoundError: No module named 'src'
+
+**問題**: Streamlit起動時に`ModuleNotFoundError: No module named 'src'`エラー  
+**原因**: Pythonが`src`モジュールを見つけられない（カレントディレクトリの問題）  
+**解決策**:
+
+```bash
+# 1. プロジェクトルートに移動
+cd C:\Users\you\work\00_proj\DataAnalysisAgent
+
+# 2. 正しいディレクトリから起動
+streamlit run src/presentation/chat_ui.py
+
+# または起動スクリプトを使用
+python run_chat_ui.py
+```
+
+#### ポートが既に使用されている
+
+**問題**: `Address already in use`エラー  
+**解決策**: 別のポートで起動
+
+```bash
+streamlit run src/presentation/chat_ui.py --server.port=8502
+```
+
 ### Python 3.13環境での問題
 
 **問題**: `japanize_matplotlib`がインストールできない  
@@ -294,10 +360,6 @@ python -m pytest tests/e2e/ -v           # E2Eテストのみ
 ```bash
 uv sync  # 依存関係を再インストール
 ```
-
-## 📝 ライセンス
-
-このプロジェクトは書籍「現場で活用するためのAIエージェント実践入門」のサンプルコードです。
 
 ## 🤝 貢献
 

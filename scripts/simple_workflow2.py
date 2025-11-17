@@ -67,7 +67,7 @@ def main():
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # データファイルパス
-    data_file = project_root / "data" / "sample.csv"
+    data_file = project_root / "data" / "rawdata 1.csv"
 
     if not data_file.exists():
         ui.show_error(f"データファイルが見つかりません: {data_file}")
@@ -128,7 +128,7 @@ print(f"データフレーム注入完了: {{df.shape}}")
         ui.show_step("分析計画生成", "ユーザーリクエストを複数の分析タスクに分解します")
         ui.show_progress("AIが分析計画を生成中...")
 
-        user_request = "データを詳しく分析して、散布図、相関行列、統計分析を含む複数のグラフを生成してください。購入金額、クリック数、コンバージョン率、チャネル別の分析を含めてください。"
+        user_request = "データを詳しく分析して、散布図、相関行列、統計分析を含む複数のグラフを生成してください。都道府県、標本サイズ、訪問者数、消費単価、別の分析を含めてください。"
 
         generate_plan_use_case = container.get_generate_plan_use_case()
         plan = generate_plan_use_case.execute(

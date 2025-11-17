@@ -51,9 +51,12 @@ class OpenAILLMRepository(LLMRepository):
         self.api_key = api_key or os.environ.get("AZURE_OPENAI_API_KEY")
         self.endpoint = endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT")
         self.api_version = os.environ.get(
-            "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
+            "AZURE_OPENAI_API_VERSION",
+            "2024-08-01-preview",
         )
-        self.deployment_name = "activarch-test-genpptx"  # 実際のデプロイメント名
+        self.deployment_name = os.environ.get(
+            "AZURE_OPENAI_DEPLOYMENT_NAME", "activarch-test-genpptx",
+        )  # 環境変数から取得
         self._offline_reason: str | None = None
 
         # Azure OpenAI クライアントの初期化
@@ -127,7 +130,8 @@ class OpenAILLMRepository(LLMRepository):
             from pydantic import BaseModel
 
             if inspect.isclass(response_format) and issubclass(
-                response_format, BaseModel
+                response_format,
+                BaseModel,
             ):
                 # Pydantic BaseModelの場合はparse()メソッドを使用
                 parse_params = {
@@ -231,9 +235,29 @@ class OpenAILLMRepository(LLMRepository):
 
     @staticmethod
     def _extract_latest_user_prompt(messages: list[dict[str, str]]) -> str:
+        preferred_prompt = ""
+
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+
+            content = message.get("content", "")
+            if not content:
+                continue
+
+            if "タスク要求" in content:
+                return content
+
+            if not content.startswith("実行結果") and not preferred_prompt:
+                preferred_prompt = content
+
+        if preferred_prompt:
+            return preferred_prompt
+
         for message in reversed(messages):
             if message.get("role") == "user":
                 return message.get("content", "")
+
         return ""
 
     @staticmethod
